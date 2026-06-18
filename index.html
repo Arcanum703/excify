@@ -1,0 +1,1344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Excify — Exchange Rate Automatization</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --green:      #9fe870;
+  --green-dark: #163300;
+  --green-bg:   #e8faf0;
+  --green-mid:  #f0fdf4;
+  --white:      #ffffff;
+  --bg:         #f7f9fc;
+  --border:     #e2e8f0;
+  --text:       #163300;
+  --body:       #4a5568;
+  --muted:      #718096;
+  --amber-bg:   #fff8e6;
+  --amber-text: #92400e;
+  --amber-bdr:  #f59e0b;
+  --blue-bg:    #eff6ff;
+  --blue-text:  #1e40af;
+  --blue-bdr:   #3b82f6;
+  --red:        #e53e3e;
+  --red-bg:     #fff5f5;
+  --red-bdr:    #feb2b2;
+  --shadow-sm:  0 2px 8px rgba(0,0,0,0.06);
+  --shadow-md:  0 4px 16px rgba(0,0,0,0.08);
+  --font:       -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --mono:       "Courier New", Courier, monospace;
+}
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--body);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+/* ── NAV ── */
+nav {
+  background: var(--white);
+  border-bottom: 1px solid var(--border);
+  padding: 0 40px;
+  height: 68px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 200;
+  gap: 24px;
+}
+
+.nav-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.nav-brand-name {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -0.5px;
+  line-height: 1;
+}
+
+.nav-brand-name span { color: var(--green); }
+
+.nav-tagline {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.nav-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--green-bg);
+  border: 1px solid var(--green);
+  border-radius: 32px;
+  padding: 6px 16px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.nav-user strong { font-weight: 700; }
+
+.nav-rate-wrap {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.nav-rate-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--muted);
+  display: block;
+}
+
+.nav-rate-value {
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--text);
+  transition: color 0.3s;
+}
+
+.nav-rate-value.flash { color: #38a169; }
+
+/* ── RULES STRIP ── */
+.rules-strip {
+  background: var(--white);
+  border-bottom: 1px solid var(--border);
+  padding: 7px 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.rule-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 12px;
+  border-radius: 32px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.rule-pill.buy  { background: var(--green-bg); color: var(--text); border: 1px solid var(--green); }
+.rule-pill.hold { background: var(--red-bg);   color: var(--red);  border: 1px solid var(--red-bdr); }
+
+/* ── HERO TABS ── */
+.hero {
+  background: linear-gradient(160deg, var(--green-bg) 0%, var(--green-mid) 100%);
+  padding: 36px 40px 0;
+}
+
+.tab-bar {
+  display: flex;
+  gap: 6px;
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.tab-btn {
+  padding: 10px 24px;
+  border: none;
+  border-radius: 32px 32px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+  background: rgba(255,255,255,0.5);
+  color: var(--body);
+}
+
+.tab-btn.active {
+  background: var(--text);
+  color: var(--white);
+}
+
+.tab-btn:not(.active):hover { background: rgba(255,255,255,0.8); }
+
+/* ── MAIN ── */
+main {
+  flex: 1;
+  max-width: 860px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 28px 40px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.tab-panel { display: none; flex-direction: column; gap: 20px; }
+.tab-panel.active { display: flex; }
+
+/* ── CARD ── */
+.card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: var(--shadow-sm);
+}
+
+.card-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--muted);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── PULSE DOT ── */
+.pulse-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #38a169;
+  opacity: 0.3;
+  flex-shrink: 0;
+  transition: opacity 0.3s;
+}
+.pulse-dot.active {
+  opacity: 1;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(56,161,105,0.4); }
+  50%      { box-shadow: 0 0 0 6px rgba(56,161,105,0); }
+}
+
+/* ── RULE BANNER ── */
+.rule-banner {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 16px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 14px;
+}
+.rule-banner.green { background: var(--green-bg); color: var(--text);  border: 1px solid var(--green); }
+.rule-banner.red   { background: var(--red-bg);   color: var(--red);   border: 1px solid var(--red-bdr); }
+.rule-banner.show  { display: flex; }
+
+/* ── REASONING BOX ── */
+.reasoning-box {
+  background: var(--bg);
+  border-radius: 10px;
+  padding: 16px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--body);
+  min-height: 72px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.reasoning-box .cursor {
+  display: inline-block;
+  width: 2px; height: 1em;
+  background: #38a169;
+  vertical-align: text-bottom;
+  animation: blink 0.8s step-end infinite;
+  margin-left: 1px;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+/* ── STATUS BADGE ── */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 6px 18px;
+  border-radius: 32px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  opacity: 0;
+  border: 1px solid transparent;
+  transition: opacity 0.4s;
+}
+.status-badge.visible { opacity: 1; }
+.status-badge.EXECUTED   { background: var(--green-bg); color: var(--text);        border-color: var(--green);    animation: badge-pulse 2s ease-in-out infinite; }
+.status-badge.HOLDING    { background: var(--amber-bg); color: var(--amber-text);  border-color: var(--amber-bdr); }
+.status-badge.MONITORING { background: var(--blue-bg);  color: var(--blue-text);   border-color: var(--blue-bdr);  }
+@keyframes badge-pulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(159,232,112,0.4); }
+  50%      { box-shadow: 0 0 10px 4px rgba(159,232,112,0); }
+}
+
+/* ── OUTCOME CARD ── */
+.outcome-card {
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  pointer-events: none;
+}
+.outcome-card.visible { opacity: 1; transform: translateY(0); pointer-events: auto; }
+
+.metrics-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.metric-box {
+  background: var(--bg);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.metric-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); }
+.metric-value { font-size: 18px; font-weight: 700; color: var(--text); }
+.metric-value.positive { color: #38a169; }
+.metric-value.negative { color: var(--red); }
+.insight-text { font-style: italic; color: var(--body); font-size: 14px; margin-bottom: 6px; }
+.pattern-text { font-size: 12px; color: var(--muted); }
+
+/* ── DEPOSIT INPUT ── */
+.deposit-row { display: flex; gap: 12px; align-items: stretch; }
+.amount-wrap { position: relative; flex: 1; }
+.amount-prefix {
+  position: absolute; left: 18px; top: 50%; transform: translateY(-50%);
+  color: var(--muted); font-size: 14px; font-weight: 600; pointer-events: none;
+}
+.amount-input {
+  width: 100%; height: 52px;
+  padding: 0 16px 0 58px;
+  border: 1.5px solid var(--border);
+  border-radius: 32px;
+  font-size: 16px; font-weight: 600;
+  color: var(--text);
+  background: var(--white);
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  -moz-appearance: textfield;
+}
+.amount-input::-webkit-outer-spin-button,
+.amount-input::-webkit-inner-spin-button { -webkit-appearance: none; }
+.amount-input:focus { border-color: #38a169; box-shadow: 0 0 0 3px rgba(56,161,105,0.12); }
+.amount-input::placeholder { color: var(--muted); font-weight: 400; }
+
+.btn-primary {
+  height: 52px; padding: 0 28px;
+  background: var(--green); color: var(--text);
+  border: none; border-radius: 32px;
+  font-size: 15px; font-weight: 600;
+  cursor: pointer; white-space: nowrap;
+  transition: background 0.2s, transform 0.1s;
+}
+.btn-primary:hover  { background: #8fda60; }
+.btn-primary:active { transform: scale(0.98); }
+.btn-primary:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; transform: none; }
+
+.amount-preview { font-size: 12px; color: var(--muted); margin-top: 8px; min-height: 16px; }
+.amount-preview span { color: var(--text); font-weight: 600; }
+
+/* ── HISTORY ── */
+.history-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 12px; }
+.history-list { display: flex; flex-direction: column; gap: 8px; }
+.history-empty { text-align: center; padding: 20px; color: var(--muted); font-size: 13px; }
+.history-item {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--bg); border-radius: 10px;
+  padding: 10px 16px; font-size: 13px;
+  animation: slide-in 0.3s ease;
+}
+@keyframes slide-in { from{opacity:0;transform:translateX(-6px)} to{opacity:1;transform:translateX(0)} }
+.history-time  { color: var(--muted); font-size: 12px; }
+.history-status { font-size: 11px; font-weight: 700; padding: 3px 12px; border-radius: 32px; }
+.history-status.EXECUTED   { background: var(--green-bg); color: var(--text); }
+.history-status.HOLDING    { background: var(--amber-bg); color: var(--amber-text); }
+.history-status.MONITORING { background: var(--blue-bg);  color: var(--blue-text); }
+.history-diff { font-size: 13px; font-weight: 600; }
+.history-diff.positive { color: #38a169; }
+.history-diff.negative { color: var(--red); }
+
+/* ═══════════════════════
+   TAB 2 — PREDICTIFY
+═══════════════════════ */
+.predictify-header { margin-bottom: 4px; }
+.predictify-header h2 { font-size: 22px; font-weight: 800; color: var(--text); margin-bottom: 4px; }
+.predictify-header p  { font-size: 14px; color: var(--body); }
+
+.pred-input-group {
+  display: flex; align-items: center; gap: 12px;
+  flex-wrap: wrap; margin-bottom: 16px;
+}
+.pred-label { font-size: 14px; color: var(--body); white-space: nowrap; }
+
+.pred-input {
+  height: 46px; padding: 0 18px;
+  border: 1.5px solid var(--border); border-radius: 32px;
+  font-size: 15px; font-weight: 600; color: var(--text);
+  background: var(--white); outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  -moz-appearance: textfield;
+}
+.pred-input::-webkit-outer-spin-button,
+.pred-input::-webkit-inner-spin-button { -webkit-appearance: none; }
+.pred-input:focus { border-color: #38a169; box-shadow: 0 0 0 3px rgba(56,161,105,0.12); }
+.pred-input.date-input { font-weight: 500; color: var(--body); }
+
+.pred-tag {
+  background: var(--green-bg); color: var(--text);
+  padding: 4px 12px; border-radius: 32px;
+  font-size: 13px; font-weight: 600;
+}
+
+.helper-text { font-size: 12px; color: var(--muted); margin-bottom: 20px; font-style: italic; }
+
+.pred-rules-row { display: flex; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+
+.pred-rule-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 14px; border-radius: 32px;
+  font-size: 12px; font-weight: 600;
+}
+.pred-rule-pill.target { background: var(--green-bg); color: var(--text);  border: 1.5px solid var(--green); }
+.pred-rule-pill.min    { background: var(--red-bg);   color: var(--red);   border: 1.5px solid var(--red-bdr); }
+
+.pred-monitor-note { font-size: 11px; color: var(--muted); margin-top: 8px; }
+
+/* ── PREDICTIFY RESULTS ── */
+.pred-results {
+  display: none; flex-direction: column; gap: 16px;
+}
+.pred-results.show { display: flex; }
+
+.pred-alert {
+  padding: 14px 20px; border-radius: 12px;
+  font-size: 14px; font-weight: 600;
+}
+.pred-alert.green { background: var(--green-bg); color: var(--text);  border: 1px solid var(--green); }
+.pred-alert.amber { background: var(--amber-bg); color: var(--amber-text); border: 1px solid var(--amber-bdr); }
+
+/* Timeline */
+.timeline-wrap { padding: 8px 0 4px; }
+.timeline-label-row {
+  display: flex; justify-content: space-between;
+  font-size: 11px; color: var(--muted); margin-bottom: 6px;
+}
+.timeline-track {
+  position: relative; height: 8px;
+  background: var(--border); border-radius: 8px; overflow: visible;
+}
+.timeline-fill {
+  position: absolute; left: 0; top: 0; height: 100%;
+  background: linear-gradient(90deg, var(--green), #6dce3f);
+  border-radius: 8px;
+  transition: width 0.8s ease;
+}
+.timeline-marker {
+  position: absolute; top: 50%;
+  transform: translate(-50%, -50%);
+  width: 16px; height: 16px;
+  background: var(--text); border: 2px solid var(--white);
+  border-radius: 50%; box-shadow: var(--shadow-sm);
+}
+.timeline-marker-label {
+  position: absolute; top: 16px;
+  transform: translateX(-50%);
+  background: var(--text); color: var(--white);
+  font-size: 10px; font-weight: 600;
+  padding: 2px 8px; border-radius: 4px;
+  white-space: nowrap;
+}
+
+/* Strategy cards */
+.strategy-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+
+.strategy-card {
+  border: 1.5px solid var(--border); border-radius: 14px; padding: 20px;
+  display: flex; flex-direction: column; gap: 10px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  background: var(--white);
+}
+.strategy-card:hover { border-color: var(--green); box-shadow: var(--shadow-md); }
+.strategy-card.recommended { border-color: var(--green); background: var(--green-bg); }
+.strategy-card.selected { border-color: var(--text); box-shadow: var(--shadow-md); }
+
+.strategy-badge {
+  display: inline-block; padding: 2px 10px;
+  border-radius: 32px; font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.strategy-badge.rec  { background: var(--text); color: var(--white); }
+.strategy-badge.cons { background: var(--border); color: var(--muted); }
+.strategy-badge.agg  { background: #fee2e2; color: var(--red); }
+
+.strategy-name { font-size: 15px; font-weight: 700; color: var(--text); }
+.strategy-rate { font-size: 22px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; }
+.strategy-desc { font-size: 12px; color: var(--body); line-height: 1.5; flex: 1; }
+
+.btn-secondary {
+  padding: 10px 20px; border-radius: 32px;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  border: 2px solid var(--text); background: var(--white); color: var(--text);
+  transition: background 0.2s, color 0.2s;
+}
+.btn-secondary:hover { background: var(--text); color: var(--white); }
+.strategy-card.recommended .btn-secondary { background: var(--text); color: var(--white); border-color: var(--text); }
+.strategy-card.recommended .btn-secondary:hover { background: #2d4a1a; }
+
+.pred-confirmation {
+  display: none; padding: 16px 20px;
+  background: var(--green-bg); border: 1px solid var(--green);
+  border-radius: 12px; font-size: 14px; color: var(--text);
+  line-height: 1.5;
+}
+.pred-confirmation.show { display: block; }
+.pred-voice-note {
+  font-size: 12px; color: var(--muted); margin-top: 20px;
+  padding-top: 16px; border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+/* ── VOICE MODE ── */
+.voice-mode-section {
+  margin-top: 20px; padding-top: 20px;
+  border-top: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  align-items: center; gap: 12px;
+}
+.voice-mode-btn {
+  width: 64px; height: 64px; border-radius: 50%;
+  background: var(--green); border: none;
+  cursor: pointer; color: var(--text);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 3px;
+  transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
+  user-select: none; -webkit-user-select: none; touch-action: none;
+}
+.voice-mode-btn:hover:not(.active) { background: #8fda60; }
+.voice-mode-btn:active             { transform: scale(0.96); }
+.voice-mode-btn.active {
+  background: var(--green-dark); color: var(--green);
+  animation: vm-pulse 1s ease-in-out infinite;
+}
+@keyframes vm-pulse {
+  0%,100% { box-shadow: 0 0 0 0   rgba(22,51,0,0.45); }
+  50%      { box-shadow: 0 0 0 16px rgba(22,51,0,0);   }
+}
+.voice-mode-label {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.6px;
+  text-transform: uppercase; pointer-events: none;
+  line-height: 1;
+}
+/* soundwave bars */
+.soundwave {
+  display: flex; align-items: center; gap: 3px;
+  height: 24px; opacity: 0; transition: opacity 0.2s;
+}
+.soundwave.active { opacity: 1; }
+.soundwave .bar {
+  width: 4px; border-radius: 2px; background: var(--green);
+  animation: sw-bar 0.7s ease-in-out infinite;
+}
+.soundwave .bar:nth-child(1){ height: 8px;  animation-delay: 0s;    }
+.soundwave .bar:nth-child(2){ height: 16px; animation-delay: 0.1s;  }
+.soundwave .bar:nth-child(3){ height: 24px; animation-delay: 0.2s;  }
+.soundwave .bar:nth-child(4){ height: 16px; animation-delay: 0.3s;  }
+.soundwave .bar:nth-child(5){ height: 8px;  animation-delay: 0.4s;  }
+@keyframes sw-bar {
+  0%,100% { transform: scaleY(1);   }
+  50%      { transform: scaleY(0.3); }
+}
+.voice-transcript {
+  font-size: 12px; color: var(--muted);
+  font-style: italic; text-align: center; min-height: 16px;
+}
+
+@media (max-width: 680px) {
+  nav { padding: 0 16px; }
+  .hero { padding: 24px 16px 0; }
+  main { padding: 20px 16px 40px; }
+  .metrics-row { grid-template-columns: repeat(2,1fr); }
+  .strategy-row { grid-template-columns: 1fr; }
+  .nav-user { display: none; }
+  .rules-strip { padding: 7px 16px; }
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a class="nav-brand" href="#">
+    <div class="nav-brand-name">Exci<span>fy</span></div>
+    <div class="nav-tagline">Exchange Rate Automatization</div>
+  </a>
+
+  <div class="nav-user">
+    <strong>Sami</strong>
+    &nbsp;·&nbsp; EUR &rarr; USD
+    &nbsp;·&nbsp; Fridays 09:00–14:00 &nbsp;·&nbsp; 92% confidence
+  </div>
+
+  <div class="nav-rate-wrap">
+    <span class="nav-rate-label">EUR / USD</span>
+    <span class="nav-rate-value" id="liveRate">—</span>
+  </div>
+</nav>
+
+<!-- RULES STRIP -->
+<div class="rules-strip">
+  Your rules:
+  <span class="rule-pill buy">&#9650; Buy above 1.12</span>
+  <span class="rule-pill hold">&#9660; Hold below 1.07</span>
+</div>
+
+<!-- HERO / TABS -->
+<div class="hero">
+  <div class="tab-bar">
+    <button class="tab-btn active" onclick="switchTab('agent')">Exchange Agent</button>
+    <button class="tab-btn"        onclick="switchTab('predictify')">Predictify</button>
+  </div>
+</div>
+
+<!-- MAIN -->
+<main>
+
+  <!-- ════════════ TAB 1: EXCHANGE AGENT ════════════ -->
+  <div class="tab-panel active" id="tab-agent">
+
+    <!-- Agent status -->
+    <div class="card">
+      <div class="card-title">
+        <div class="pulse-dot" id="pulseDot"></div>
+        Agent Status
+      </div>
+      <div id="ruleBanner" class="rule-banner"></div>
+      <div class="reasoning-box">
+        <span id="reasoningText" style="color:var(--muted)">Watching markets... Waiting for deposit trigger.</span><span class="cursor" id="cursor" style="display:none"></span>
+      </div>
+      <div class="status-badge" id="statusBadge"></div>
+    </div>
+
+    <!-- Outcome -->
+    <div class="outcome-card" id="outcomeCard">
+      <div class="card">
+        <div class="metrics-row">
+          <div class="metric-box">
+            <span class="metric-label">Rate Today</span>
+            <span class="metric-value" id="mRateToday">—</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-label">Friday Average</span>
+            <span class="metric-value" id="mRateAvg">—</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-label">Rate Difference</span>
+            <span class="metric-value" id="mRateDiff">—</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-label">Profit / Loss</span>
+            <span class="metric-value" id="mProfitLoss">—</span>
+          </div>
+        </div>
+        <div class="insight-text" id="insightText"></div>
+        <div class="pattern-text" id="patternText"></div>
+      </div>
+    </div>
+
+    <!-- Deposit input -->
+    <div class="card">
+      <div class="card-title">Simulate a Deposit</div>
+      <div class="deposit-row">
+        <div class="amount-wrap">
+          <span class="amount-prefix">EUR</span>
+          <input class="amount-input" id="amountInput" type="number" min="1" step="any"
+                 placeholder="Enter amount in EUR" oninput="updatePreview()">
+        </div>
+        <button class="btn-primary" id="depositBtn" onclick="runDeposit()">Simulate Deposit</button>
+      </div>
+      <div class="amount-preview" id="amountPreview">&nbsp;</div>
+
+      <!-- Voice Mode -->
+      <div class="voice-mode-section" id="voiceModeSection">
+        <button class="voice-mode-btn" id="voiceModeBtn" onclick="voiceToggle()">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" style="pointer-events:none">
+            <rect x="9" y="2" width="6" height="12" rx="3" fill="currentColor"/>
+            <path d="M5 10v2a7 7 0 0014 0v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <line x1="12" y1="19" x2="12" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <line x1="8" y1="22" x2="16" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <span class="voice-mode-label" id="voiceModeLabel">Voice Mode</span>
+        </button>
+        <div class="soundwave" id="soundwave">
+          <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+          <div class="bar"></div><div class="bar"></div>
+        </div>
+        <div class="voice-transcript" id="voiceTranscript"></div>
+      </div>
+    </div>
+
+    <!-- History -->
+    <div class="card">
+      <div class="history-title">Recent Triggers</div>
+      <div class="history-list" id="historyList">
+        <div class="history-empty">No triggers yet</div>
+      </div>
+    </div>
+
+  </div><!-- /tab-agent -->
+
+
+  <!-- ════════════ TAB 2: PREDICTIFY ════════════ -->
+  <div class="tab-panel" id="tab-predictify">
+
+    <div class="card">
+      <div class="predictify-header">
+        <h2>Predictify</h2>
+        <p>Tell us your deadline. We find the best rate before it.</p>
+      </div>
+
+      <div style="height:20px"></div>
+
+      <div class="pred-input-group">
+        <span class="pred-label">I want to exchange</span>
+        <div class="amount-wrap" style="max-width:160px">
+          <span class="amount-prefix">EUR</span>
+          <input class="pred-input" id="predAmount" type="number" min="1" step="any"
+                 placeholder="1,200" style="padding-left:58px;width:160px">
+        </div>
+        <span class="pred-tag">EUR &rarr; USD</span>
+      </div>
+
+      <div class="pred-input-group">
+        <span class="pred-label">I need it by</span>
+        <input class="pred-input date-input" id="predDeadline" type="date" style="width:180px">
+      </div>
+
+      <div class="helper-text">
+        e.g. travelling to Madrid on Apr 27? Set that as your deadline.
+      </div>
+
+      <div class="pred-rules-row">
+        <span class="pred-rule-pill target">&#9679; Target rate &middot; 1.12 (always execute at this)</span>
+        <span class="pred-rule-pill min">&#9679; Min threshold &middot; 1.07 (never exchange below)</span>
+      </div>
+      <div class="pred-monitor-note">Agent will monitor rates daily until your deadline</div>
+
+      <div style="height:20px"></div>
+
+      <button class="btn-primary" id="predBtn" onclick="runPredictify()" style="width:100%;height:52px;font-size:16px">
+        Find Best Rate
+      </button>
+    </div>
+
+    <!-- Results (hidden until submitted) -->
+    <div class="pred-results" id="predResults">
+
+      <div id="predAlert"></div>
+
+      <!-- Timeline card -->
+      <div class="card" id="predTimelineCard">
+        <div class="card-title">Rate Window Forecast</div>
+        <div class="timeline-wrap">
+          <div class="timeline-label-row">
+            <span id="tlToday">Today</span>
+            <span style="color:var(--text);font-weight:600">Best predicted window</span>
+            <span id="tlDeadline">Deadline</span>
+          </div>
+          <div class="timeline-track">
+            <div class="timeline-fill" id="tlFill" style="width:0%"></div>
+            <div class="timeline-marker" id="tlMarker" style="left:0%">
+              <div class="timeline-marker-label" id="tlMarkerLabel">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Strategy cards -->
+      <div class="card">
+        <div class="card-title">Choose Your Strategy</div>
+        <div class="strategy-row" id="strategyRow"></div>
+        <div class="pred-confirmation" id="predConfirmation"></div>
+        <div class="pred-voice-note">
+          Agent checks rates every 15 minutes. You will hear a voice confirmation when exchange is executed.
+        </div>
+      </div>
+
+    </div><!-- /predResults -->
+
+  </div><!-- /tab-predictify -->
+
+</main>
+
+<audio id="audioPlayer" style="display:none"></audio>
+
+<script>
+const API = 'http://127.0.0.1:8000';
+const RULE_BUY  = 1.12;
+const RULE_HOLD = 1.07;
+const triggerHistory = [];
+let liveRate = null;
+let _predState = null;
+
+/* ── TAB SWITCH ── */
+function switchTab(name) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(`tab-${name}`).classList.add('active');
+  event.currentTarget.classList.add('active');
+}
+
+/* ── LIVE RATE ── */
+async function fetchLiveRate() {
+  const el = document.getElementById('liveRate');
+  let newRate = null;
+
+  // Primary: local server (explicit IPv4 — localhost can resolve to ::1)
+  try {
+    const res = await fetch('http://127.0.0.1:8000/rate');
+    if (res.ok) newRate = (await res.json()).rate;
+  } catch {}
+
+  // Fallback: Frankfurter (works from file:/// — no CORS restrictions, no auth needed)
+  if (!newRate) {
+    try {
+      const res = await fetch('https://api.frankfurter.dev/v1/latest?from=EUR&to=USD');
+      if (res.ok) newRate = (await res.json()).rates.USD;
+    } catch {}
+  }
+
+  if (newRate) {
+    const prev = liveRate;
+    liveRate = newRate;
+    const val = newRate.toFixed(4);
+    if (el.textContent !== val) {
+      el.textContent = val;
+      el.classList.add('flash');
+      setTimeout(() => el.classList.remove('flash'), 400);
+    }
+    if (prev !== liveRate && _predState &&
+        document.getElementById('predResults').classList.contains('show')) {
+      buildStrategies(_predState.amount, liveRate, _predState.daysLeft, _predState.deadline, liveRate >= RULE_BUY);
+    }
+  } else {
+    if (el.textContent === '—') el.textContent = 'offline';
+  }
+}
+fetchLiveRate();
+setInterval(fetchLiveRate, 10000);
+
+/* ── DEPOSIT INPUT PREVIEW ── */
+function updatePreview() {
+  const val = parseFloat(document.getElementById('amountInput').value);
+  const el  = document.getElementById('amountPreview');
+  el.innerHTML = val > 0
+    ? `Simulating exchange of <span>EUR ${val.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span> to USD`
+    : '&nbsp;';
+}
+
+/* ── RULES OVERRIDE ── */
+function applyRules(data) {
+  const banner = document.getElementById('ruleBanner');
+  banner.className = 'rule-banner';
+  banner.textContent = '';
+  if (data.rate_today >= RULE_BUY) {
+    data.status = 'EXECUTED';
+    banner.className = 'rule-banner green show';
+    banner.textContent = `Rate hit your target of ${RULE_BUY} — executed automatically`;
+  } else if (data.rate_today <= RULE_HOLD) {
+    data.status = 'HOLDING';
+    banner.className = 'rule-banner red show';
+    banner.textContent = `Rate below your minimum threshold of ${RULE_HOLD} — holding position`;
+  }
+  return data;
+}
+
+/* ── TYPEWRITER ── */
+function typewrite(text, onDone) {
+  const textEl = document.getElementById('reasoningText');
+  const cursor = document.getElementById('cursor');
+  const dot    = document.getElementById('pulseDot');
+  textEl.style.color = 'var(--body)';
+  textEl.textContent = '';
+  cursor.style.display = 'inline-block';
+  dot.classList.add('active');
+  let i = 0;
+  const iv = setInterval(() => {
+    textEl.textContent += text[i++];
+    if (i >= text.length) {
+      clearInterval(iv);
+      cursor.style.display = 'none';
+      dot.classList.remove('active');
+      if (onDone) onDone();
+    }
+  }, 15);
+}
+
+/* ── STATUS BADGE ── */
+function showBadge(status) {
+  const badge = document.getElementById('statusBadge');
+  const labels = { EXECUTED:'Executed', HOLDING:'Holding', MONITORING:'Monitoring' };
+  const icons  = { EXECUTED:'&#10003;', HOLDING:'&#9646;', MONITORING:'&#9675;' };
+  badge.className = `status-badge ${status} visible`;
+  badge.innerHTML = `${icons[status]} ${labels[status]}`;
+}
+
+/* ── OUTCOME ── */
+function showOutcome(data) {
+  const diffRaw = data.rate_difference;
+  const isPos   = diffRaw.startsWith('+');
+  const isNeg   = diffRaw.startsWith('-');
+
+  document.getElementById('mRateToday').textContent = data.rate_today;
+  document.getElementById('mRateAvg').textContent   = data.rate_friday_average;
+
+  const diffEl = document.getElementById('mRateDiff');
+  diffEl.className = 'metric-value' + (isPos ? ' positive' : isNeg ? ' negative' : '');
+  animateRateDiff(diffEl, diffRaw);
+
+  const plEl  = document.getElementById('mProfitLoss');
+  const plStr = data.profit_loss;
+  plEl.textContent = plStr;
+  plEl.className   = 'metric-value' + (plStr.startsWith('+') ? ' positive' : plStr.startsWith('-') ? ' negative' : '');
+
+  document.getElementById('insightText').textContent = data.insight;
+  document.getElementById('patternText').textContent = data.pattern;
+  document.getElementById('outcomeCard').classList.add('visible');
+}
+
+function animateRateDiff(el, finalStr) {
+  const sign  = finalStr.startsWith('+') ? '+' : finalStr.startsWith('-') ? '-' : '';
+  const num   = parseFloat(finalStr.replace('%','').replace('+','').replace('-',''));
+  const steps = 40; let step = 0;
+  const iv = setInterval(() => {
+    el.textContent = `${sign}${(num * ++step / steps).toFixed(2)}%`;
+    if (step >= steps) { clearInterval(iv); el.textContent = finalStr; }
+  }, 800 / steps);
+}
+
+/* ── HISTORY ── */
+function addHistory(data) {
+  triggerHistory.unshift({ time: new Date().toLocaleTimeString(), status: data.status, diff: data.rate_difference });
+  if (triggerHistory.length > 5) triggerHistory.pop();
+  document.getElementById('historyList').innerHTML = triggerHistory.map(h => {
+    const cls = h.diff.startsWith('+') ? 'positive' : h.diff.startsWith('-') ? 'negative' : '';
+    return `<div class="history-item">
+      <span class="history-time">${h.time}</span>
+      <span class="history-status ${h.status}">${h.status}</span>
+      <span class="history-diff ${cls}">${h.diff}</span>
+    </div>`;
+  }).join('');
+}
+
+/* ── AUDIO ── */
+function playAudio() {
+  const p = document.getElementById('audioPlayer');
+  p.src = `${API}/static/audio.mp3?t=${Date.now()}`;
+  p.play().catch(() => {});
+}
+
+/* ── DEPOSIT ── */
+async function runDeposit() {
+  const input  = document.getElementById('amountInput');
+  const amount = parseFloat(input.value);
+  if (!amount || amount <= 0) {
+    input.focus(); input.style.borderColor = 'var(--red)';
+    setTimeout(() => input.style.borderColor = '', 1200); return;
+  }
+  const btn = document.getElementById('depositBtn');
+  btn.disabled = true; btn.textContent = 'Contacting agent...';
+  document.getElementById('statusBadge').className = 'status-badge';
+  document.getElementById('outcomeCard').classList.remove('visible');
+  document.getElementById('ruleBanner').className = 'rule-banner';
+  document.getElementById('reasoningText').style.color = 'var(--muted)';
+  document.getElementById('reasoningText').textContent = 'Sending to agent...';
+  try {
+    const res = await fetch(`${API}/deposit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount_eur: amount }),
+    });
+    if (!res.ok) throw new Error(`Server responded with ${res.status}`);
+    let data = await res.json();
+    data = applyRules(data);
+    typewrite(data.agent_reasoning, () => {
+      showBadge(data.status);
+      showOutcome(data);
+      playAudio();
+    });
+    addHistory(data);
+  } catch (err) {
+    document.getElementById('ruleBanner').className = 'rule-banner red show';
+    document.getElementById('ruleBanner').textContent = `Could not reach server at ${API}. Is it running?`;
+    document.getElementById('reasoningText').style.color = 'var(--muted)';
+    document.getElementById('reasoningText').textContent = err.message;
+    document.getElementById('cursor').style.display = 'none';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Simulate Deposit';
+  }
+}
+
+/* ════════════════════════════
+   PREDICTIFY LOGIC (simulated)
+════════════════════════════ */
+function runPredictify() {
+  const amountVal   = parseFloat(document.getElementById('predAmount').value) || 1200;
+  const deadlineVal = document.getElementById('predDeadline').value;
+
+  if (!deadlineVal) {
+    const dl = document.getElementById('predDeadline');
+    dl.style.borderColor = 'var(--red)';
+    setTimeout(() => dl.style.borderColor = '', 1200); return;
+  }
+
+  const today    = new Date(); today.setHours(0,0,0,0);
+  const deadline = new Date(deadlineVal); deadline.setHours(0,0,0,0);
+  const daysLeft = Math.round((deadline - today) / 86400000);
+
+  if (daysLeft < 1) {
+    showPredAlert('amber', 'Deadline must be at least 1 day in the future.');
+    document.getElementById('predResults').classList.add('show');
+    document.getElementById('predTimelineCard').style.display = 'none';
+    document.getElementById('strategyRow').innerHTML = '';
+    document.getElementById('predConfirmation').classList.remove('show');
+    return;
+  }
+
+  if (!liveRate) {
+    showPredAlert('amber', 'Live rate not loaded yet — please wait a moment and try again.');
+    document.getElementById('predResults').classList.add('show');
+    document.getElementById('predTimelineCard').style.display = 'none';
+    document.getElementById('strategyRow').innerHTML = '';
+    return;
+  }
+  const currentRate = liveRate;
+  const results     = document.getElementById('predResults');
+  const alertEl     = document.getElementById('predAlert');
+
+  results.classList.add('show');
+  document.getElementById('predTimelineCard').style.display = '';
+  document.getElementById('predConfirmation').classList.remove('show');
+
+  // Special rate alerts
+  if (currentRate >= RULE_BUY) {
+    showPredAlert('green', `Target rate already reached (${currentRate.toFixed(4)}) — executing now!`);
+    buildStrategies(amountVal, currentRate, daysLeft, deadline, true);
+    return;
+  }
+  if (currentRate <= RULE_HOLD) {
+    showPredAlert('amber', `Current rate (${currentRate.toFixed(4)}) is below your minimum threshold of ${RULE_HOLD}. Agent will wait.`);
+    alertEl.className = '';
+  }
+
+  alertEl.className = '';
+  buildStrategies(amountVal, currentRate, daysLeft, deadline, false);
+}
+
+function showPredAlert(type, msg) {
+  const el = document.getElementById('predAlert');
+  el.className = `pred-alert ${type}`;
+  el.textContent = msg;
+}
+
+function buildStrategies(amount, currentRate, daysLeft, deadline, alreadyHit) {
+  _predState = { amount, daysLeft, deadline };
+  // Rates
+  const consRate = parseFloat(currentRate.toFixed(4));
+  const optRate  = parseFloat((currentRate * 1.008).toFixed(4));
+  const aggRate  = parseFloat((currentRate * 1.015).toFixed(4));
+
+  // Optimal date: today + random 2..(daysLeft-1), or tomorrow if tight
+  const optOffsetMax = Math.max(2, daysLeft - 1);
+  const optOffset    = daysLeft < 3 ? 1 : Math.floor(Math.random() * (optOffsetMax - 1)) + 2;
+  const optDate      = new Date(); optDate.setDate(optDate.getDate() + optOffset);
+  const optDateStr   = optDate.toLocaleDateString('en-GB', { day:'numeric', month:'short' });
+  const deadlineStr  = deadline.toLocaleDateString('en-GB', { day:'numeric', month:'short' });
+
+  // Timeline
+  document.getElementById('tlToday').textContent    = 'Today';
+  document.getElementById('tlDeadline').textContent  = deadlineStr;
+  const pct = daysLeft < 3 ? 40 : Math.round((optOffset / daysLeft) * 80) + 10;
+  document.getElementById('tlFill').style.width        = pct + '%';
+  document.getElementById('tlMarker').style.left       = pct + '%';
+  document.getElementById('tlMarkerLabel').textContent = optDateStr;
+
+  // Build cards
+  const strategies = daysLeft < 3
+    ? [{ type:'cons', badge:'cons', label:'Conservative', badgeTxt:'Only Option',
+         rate: consRate, desc:`Exchange now at the current rate. Given your tight deadline, this is the safest choice.`,
+         btnClass:'btn-secondary' }]
+    : [
+        { type:'cons', badge:'cons', label:'Conservative', badgeTxt:'Low Risk',
+          rate: consRate, desc:`Exchange immediately at today's rate. No waiting, no risk.`,
+          btnClass:'btn-secondary' },
+        { type:'opt',  badge:'rec',  label:'Optimal', badgeTxt:'Recommended',
+          rate: optRate,  desc:`Wait until ${optDateStr} for an estimated rate of ${optRate}. Best balance of gain and certainty.`,
+          btnClass:'btn-secondary', recommended: true },
+        { type:'agg',  badge:'agg',  label:'Aggressive', badgeTxt:'Higher Risk',
+          rate: aggRate,  desc:`Hold for maximum rate. Higher potential gain but risk of missing deadline.`,
+          btnClass:'btn-secondary' },
+      ];
+
+  document.getElementById('strategyRow').innerHTML = strategies.map(s => `
+    <div class="strategy-card ${s.recommended ? 'recommended' : ''}" id="scard-${s.type}">
+      <span class="strategy-badge ${s.badge}">${s.badgeTxt}</span>
+      <div class="strategy-name">${s.label}</div>
+      <div class="strategy-rate">${s.rate.toFixed(4)}</div>
+      <div class="strategy-desc">${s.desc}</div>
+      <button class="${s.btnClass}" onclick="selectStrategy('${s.type}','${s.label}','${deadlineStr}','${s.rate}')">
+        Select Strategy
+      </button>
+    </div>`).join('');
+}
+
+function selectStrategy(type, label, deadline, rate) {
+  document.querySelectorAll('.strategy-card').forEach(c => c.classList.remove('selected'));
+  const card = document.getElementById(`scard-${type}`);
+  if (card) card.classList.add('selected');
+
+  const conf = document.getElementById('predConfirmation');
+  conf.innerHTML = `<strong>Strategy selected: ${label}</strong><br>
+Agent will monitor and execute automatically by <strong>${deadline}</strong> at a target rate of <strong>${parseFloat(rate).toFixed(4)}</strong> or better.`;
+  conf.classList.add('show');
+  conf.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+/* ── Set default date to 7 days from now ── */
+(function setDefaultDate() {
+  const d = new Date(); d.setDate(d.getDate() + 7);
+  document.getElementById('predDeadline').value = d.toISOString().split('T')[0];
+})();
+
+/* ════════════════════════════
+   VOICE MODE AGENT
+════════════════════════════ */
+(function initVoiceMode() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const btn       = document.getElementById('voiceModeBtn');
+  const label     = document.getElementById('voiceModeLabel');
+  const soundwave = document.getElementById('soundwave');
+  const transcript= document.getElementById('voiceTranscript');
+  const section   = document.getElementById('voiceModeSection');
+
+  if (!SpeechRecognition) { if (section) section.style.display = 'none'; return; }
+
+  const recognition = new SpeechRecognition();
+  recognition.lang = 'en-US';
+  recognition.continuous = false;
+  recognition.interimResults = false;
+
+  let isListening = false;
+
+  /* ── UI helpers ── */
+  function setListening(on) {
+    isListening = on;
+    btn.classList.toggle('active', on);
+    soundwave.classList.toggle('active', on);
+    label.textContent = on ? 'Listening...' : 'Voice Mode';
+  }
+  function setTranscript(msg) { transcript.textContent = msg; }
+
+  /* ── Number parser (digits + English words) ── */
+  function parseAmount(text) {
+    const m = text.match(/\b(\d[\d,]*(?:\.\d+)?)\b/);
+    if (m) return parseFloat(m[1].replace(/,/g, ''));
+    const W = {
+      zero:0,one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,
+      ten:10,eleven:11,twelve:12,thirteen:13,fourteen:14,fifteen:15,
+      sixteen:16,seventeen:17,eighteen:18,nineteen:19,
+      twenty:20,thirty:30,forty:40,fifty:50,sixty:60,seventy:70,eighty:80,ninety:90,
+      hundred:100,thousand:1000,million:1000000
+    };
+    const words = text.toLowerCase().split(/[\s,]+/);
+    let chunk = 0, total = 0, found = false;
+    for (const w of words) {
+      if (!(w in W)) continue;
+      found = true;
+      const v = W[w];
+      if (v >= 1000000) { total += (chunk||1)*v; chunk=0; }
+      else if (v >= 1000){ total += (chunk||1)*v; chunk=0; }
+      else if (v === 100) { chunk = (chunk||1)*v; }
+      else                { chunk += v; }
+    }
+    return found ? total + chunk : null;
+  }
+
+  /* ── Speak: backend /speak (ElevenLabs turbo_v2) or browser fallback ── */
+  async function speakText(text) {
+    setTranscript(text);
+    try {
+      const res = await fetch(`${API}/speak`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, model: 'eleven_turbo_v2' })
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const p    = document.getElementById('audioPlayer');
+        p.src = URL.createObjectURL(blob);
+        p.play().catch(()=>{});
+        return;
+      }
+    } catch(e) {}
+    if (window.speechSynthesis) {
+      const utt = new SpeechSynthesisUtterance(text);
+      utt.lang = 'en-US'; utt.rate = 1.1;
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utt);
+    }
+  }
+
+  /* ── Last-month average from Frankfurter ── */
+  async function fetchLastMonthAvg() {
+    const now   = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const end   = new Date(now.getFullYear(), now.getMonth(), 0);
+    const fmt   = d => d.toISOString().split('T')[0];
+    const res   = await fetch(
+      `https://api.frankfurter.app/${fmt(start)}..${fmt(end)}?from=EUR&to=USD`
+    );
+    const data  = await res.json();
+    const vals  = Object.values(data.rates).map(r => r.USD);
+    return (vals.reduce((a,b)=>a+b,0) / vals.length).toFixed(4);
+  }
+
+  /* ── Intent dispatcher ── */
+  async function handleTranscript(raw) {
+    const lower = raw.toLowerCase();
+    setTranscript(`Heard: "${raw}"`);
+
+    /* INTENT 1 — Exchange / Buy */
+    if (/exchange|convert|send|buy/.test(lower)) {
+      let amount = parseAmount(raw);
+      if (!amount && /now/.test(lower)) {
+        const v = parseFloat(document.getElementById('amountInput').value);
+        if (v > 0) amount = v;
+      }
+      if (!amount) amount = 1200;
+      document.getElementById('amountInput').value = amount;
+      updatePreview();
+      setTranscript(`Heard: "${raw}" — Processing…`);
+      await runDeposit();
+      return;
+    }
+
+    /* INTENT 5 — Predictify */
+    if (/madrid|trip|travel|deadline|by april|by may|by june|before/.test(lower)) {
+      document.querySelectorAll('.tab-btn').forEach((b,i)   => b.classList.toggle('active', i===1));
+      document.querySelectorAll('.tab-panel').forEach((p,i) => p.classList.toggle('active', i===1));
+      speakText('Predictify. Set your deadline.');
+      return;
+    }
+
+    /* INTENT 3 — Last month average (Frankfurter) */
+    if (/average|last month|previous|history|past/.test(lower)) {
+      try {
+        const avg = await fetchLastMonthAvg();
+        speakText(`Last month: ${avg}.`);
+      } catch(e) {
+        speakText('Could not fetch data.');
+      }
+      return;
+    }
+
+    /* INTENT 2 — Live rate */
+    if (/rate|what is|what's|current|today|price/.test(lower)) {
+      await fetchLiveRate();
+      const r = liveRate || 1.177;
+      speakText(`Rate: ${r.toFixed(4)}.`);
+      return;
+    }
+
+    /* INTENT 4 — Status */
+    if (/status|agent|watching|monitoring|doing/.test(lower)) {
+      const r      = liveRate || 1.177;
+      const badge  = document.getElementById('statusBadge');
+      const status = badge.classList.contains('EXECUTED') ? 'Executed'
+                   : badge.classList.contains('HOLDING')  ? 'Holding'
+                   : 'Monitoring';
+      speakText(`Today's rate is ${r.toFixed(2)}.`);
+      return;
+    }
+
+    /* INTENT — Compare yesterday vs today */
+    if (/compare|yesterday|versus|vs/.test(lower)) {
+      try {
+        const yest = new Date(); yest.setDate(yest.getDate() - 1);
+        const yStr = yest.toISOString().split('T')[0];
+        const [r1, r2] = await Promise.all([
+          fetch(`https://api.frankfurter.app/${yStr}?from=EUR&to=USD`).then(r=>r.json()).then(d=>d.rates.USD),
+          fetch(`https://api.frankfurter.app/latest?from=EUR&to=USD`).then(r=>r.json()).then(d=>d.rates.USD)
+        ]);
+        const diff = (((r2 - r1) / r1) * 100).toFixed(2);
+        const dir  = diff >= 0 ? 'up' : 'down';
+        speakText(`Yesterday ${r1.toFixed(4)}, today ${r2.toFixed(4)} — ${dir} ${Math.abs(diff)}%.`);
+      } catch(e) {
+        speakText('Could not fetch rates.');
+      }
+      return;
+    }
+
+    /* DEFAULT */
+    speakText('Exchange, rate, or history.');
+  }
+
+  /* ── Recognition events ── */
+  recognition.onstart = () => setListening(true);
+
+  recognition.onresult = (e) => {
+    setListening(false);
+    handleTranscript(e.results[0][0].transcript.trim());
+  };
+
+  recognition.onerror = (e) => {
+    setListening(false);
+    if (e.error === 'no-speech') {
+      setTranscript("Didn't catch that.");
+      setTimeout(() => setTranscript(''), 2000);
+    } else if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      setTranscript('Mic access required.');
+    } else {
+      setTranscript(`Error: ${e.error}`);
+      setTimeout(() => setTranscript(''), 2000);
+    }
+  };
+
+  recognition.onend = () => setListening(false);
+
+  /* ── Tap-to-toggle ── */
+  window.voiceToggle = function() {
+    if (isListening) {
+      try { recognition.stop(); } catch(e) {}
+    } else {
+      try { recognition.start(); } catch(e) {}
+    }
+  };
+})();
+</script>
+</body>
+</html>
