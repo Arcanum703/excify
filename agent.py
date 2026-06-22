@@ -2,15 +2,17 @@ import json
 import os
 from pathlib import Path
 
-import google.generativeai as genai
+from openai import AsyncOpenAI
 
 import pattern_engine
 from rates import convert, get_rates
 
 HISTORY_PATH = Path(__file__).parent / "data" / "history.json"
 
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-MODEL = "gemini-2.0-flash"
+# Cerebras exposes an OpenAI-compatible API, so we drive it with the OpenAI SDK.
+CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
+MODEL = "gpt-oss-120b"
+MAX_TOOL_ITERATIONS = 6
 
 SYSTEM_PROMPT = """You are a helpful currency exchange assistant. You can:
 - Convert amounts between currencies
@@ -21,55 +23,62 @@ SYSTEM_PROMPT = """You are a helpful currency exchange assistant. You can:
 When the user asks to convert currency or get rates, use the provided tools.
 Always be concise and friendly."""
 
+# OpenAI-style tool schema (Cerebras supports function calling on Llama 3.3 70B).
 TOOLS = [
     {
-        "name": "convert_currency",
-        "description": "Convert an amount from one currency to another using live rates.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "amount": {"type": "number", "description": "The amount to convert."},
-                "from_currency": {"type": "string", "description": "ISO 4217 source currency code (e.g. USD)."},
-                "to_currency": {"type": "string", "description": "ISO 4217 target currency code (e.g. EUR)."},
+        "type": "function",
+        "function": {
+            "name": "convert_currency",
+            "description": "Convert an amount from one currency to another using live rates.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "amount": {"type": "number", "description": "The amount to convert."},
+                    "from_currency": {"type": "string", "description": "ISO 4217 source currency code (e.g. USD)."},
+                    "to_currency": {"type": "string", "description": "ISO 4217 target currency code (e.g. EUR)."},
+                },
+                "required": ["amount", "from_currency", "to_currency"],
             },
-            "required": ["amount", "from_currency", "to_currency"],
         },
     },
     {
-        "name": "get_exchange_rates",
-        "description": "Retrieve current exchange rates for a base currency.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "base_currency": {"type": "string", "description": "ISO 4217 base currency code (e.g. USD)."},
+        "type": "function",
+        "function": {
+            "name": "get_exchange_rates",
+            "description": "Retrieve current exchange rates for a base currency.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "base_currency": {"type": "string", "description": "ISO 4217 base currency code (e.g. USD)."},
+                },
+                "required": ["base_currency"],
             },
-            "required": ["base_currency"],
         },
     },
     {
-        "name": "get_transaction_history",
-        "description": "Return the user's past currency exchange transactions.",
-        "parameters": {
-            "type": "object",
-            "properties": {},
-            "required": [],
+        "type": "function",
+        "function": {
+            "name": "get_transaction_history",
+            "description": "Return the user's past currency exchange transactions.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
         },
     },
 ]
 
 
-def _to_gemini_messages(messages: list[dict]) -> list[dict]:
-    """Convert {role, content} dicts to Gemini's {role, parts} format."""
-    result = []
-    for msg in messages:
-        role = "model" if msg["role"] == "assistant" else msg["role"]
-        content = msg["content"]
-        if isinstance(content, str):
-            result.append({"role": role, "parts": [{"text": content}]})
-        else:
-            # Already in Gemini parts format (tool results injected internally)
-            result.append({"role": role, "parts": content})
-    return result
+def _client() -> AsyncOpenAI:
+    """Build a Cerebras client, raising a clear error if the key is missing."""
+    api_key = os.getenv("CEREBRAS_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "CEREBRAS_API_KEY is not set. Get a free key at https://cloud.cerebras.ai "
+            "and set it as an environment variable (or in your .env file)."
+        )
+    return AsyncOpenAI(api_key=api_key, base_url=CEREBRAS_BASE_URL)
 
 
 async def analyze_pattern(history: list) -> dict:
@@ -129,40 +138,49 @@ async def _run_tool(name: str, args: dict) -> str:
 
 
 async def chat(messages: list[dict]) -> str:
-    """Run an agentic loop and return the final assistant text response."""
-    model = genai.GenerativeModel(
-        model_name=MODEL,
-        system_instruction=SYSTEM_PROMPT,
-        tools=TOOLS,
-    )
+    """Run an agentic loop against Cerebras and return the final assistant text."""
+    client = _client()
+    convo = [{"role": "system", "content": SYSTEM_PROMPT}] + list(messages)
 
-    gemini_messages = _to_gemini_messages(messages)
+    for _ in range(MAX_TOOL_ITERATIONS):
+        response = await client.chat.completions.create(
+            model=MODEL,
+            messages=convo,
+            tools=TOOLS,
+            tool_choice="auto",
+        )
+        msg = response.choices[0].message
 
-    while True:
-        response = await model.generate_content_async(gemini_messages)
-        candidate = response.candidates[0]
-        parts = candidate.content.parts
+        if not msg.tool_calls:
+            # No tool calls — return the assistant's text answer.
+            return msg.content or ""
 
-        # Check if any part is a function call
-        function_calls = [p for p in parts if hasattr(p, "function_call") and p.function_call.name]
-
-        if not function_calls:
-            # No tool calls — collect text and return
-            return "\n".join(p.text for p in parts if hasattr(p, "text") and p.text)
-
-        # Append the model turn
-        gemini_messages.append({"role": "model", "parts": parts})
-
-        # Execute tools and collect function responses
-        tool_response_parts = []
-        for part in function_calls:
-            fc = part.function_call
-            output = await _run_tool(fc.name, dict(fc.args))
-            tool_response_parts.append({
-                "function_response": {
-                    "name": fc.name,
-                    "response": {"result": output},
+        # Record the assistant turn (with its tool-call requests), then run them.
+        convo.append({
+            "role": "assistant",
+            "content": msg.content or "",
+            "tool_calls": [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
                 }
+                for tc in msg.tool_calls
+            ],
+        })
+
+        for tc in msg.tool_calls:
+            try:
+                args = json.loads(tc.function.arguments or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            output = await _run_tool(tc.function.name, args)
+            convo.append({
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": output,
             })
 
-        gemini_messages.append({"role": "user", "parts": tool_response_parts})
+    # Safety valve: ask for a final answer without further tool use.
+    response = await client.chat.completions.create(model=MODEL, messages=convo)
+    return response.choices[0].message.content or ""

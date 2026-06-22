@@ -798,7 +798,10 @@ main {
 <audio id="audioPlayer" style="display:none"></audio>
 
 <script>
-const API = 'http://127.0.0.1:8000';
+// Same-origin: empty base means requests go to whatever host serves this page.
+// Works when the FastAPI app serves index.html (localhost or a deployed domain),
+// and degrades gracefully (Frankfurter fallback) when opened directly as a file.
+const API = '';
 const RULE_BUY  = 1.12;
 const RULE_HOLD = 1.07;
 const triggerHistory = [];
@@ -818,9 +821,9 @@ async function fetchLiveRate() {
   const el = document.getElementById('liveRate');
   let newRate = null;
 
-  // Primary: local server (explicit IPv4 — localhost can resolve to ::1)
+  // Primary: the app's own /rate endpoint (same origin)
   try {
-    const res = await fetch('http://127.0.0.1:8000/rate');
+    const res = await fetch(`${API}/rate`);
     if (res.ok) newRate = (await res.json()).rate;
   } catch {}
 

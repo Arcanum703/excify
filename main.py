@@ -1,13 +1,13 @@
-import asyncio
 import json
 import os
 import random
 from pathlib import Path
 
 import httpx
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -15,10 +15,16 @@ import pattern_engine
 from agent import analyze_pattern, chat, generate_reasoning
 from rates import convert, get_current_rate, get_rates
 
+# Load API keys from a local .env file if present (CEREBRAS_API_KEY, ELEVENLABS_API_KEY).
+# utf-8-sig tolerates a BOM, which Windows editors (Notepad, PowerShell) often add.
+load_dotenv(encoding="utf-8-sig")
+
 HISTORY_PATH = Path(__file__).parent / "data" / "history.json"
+INDEX_PATH = Path(__file__).parent / "index.html"
 STATIC_DIR = Path(__file__).parent / "static"
 AUDIO_PATH = STATIC_DIR / "audio.mp3"
 ELEVENLABS_URL = "https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM"
+ELEVENLABS_MODEL = "eleven_turbo_v2"
 AVG_RATE_BASELINE = 1.08
 
 STATIC_DIR.mkdir(exist_ok=True)
@@ -57,17 +63,21 @@ class DepositRequest(BaseModel):
     amount_eur: float
 
 
+class SpeakRequest(BaseModel):
+    text: str
+    model: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-async def _speak(text: str) -> bool:
-    """Send text to ElevenLabs and save the audio to static/audio.mp3.
-    Returns True on success, False if the API call fails."""
+async def _tts_bytes(text: str, model_id: str = ELEVENLABS_MODEL) -> bytes | None:
+    """Synthesise speech with ElevenLabs and return raw MP3 bytes.
+    Returns None if no API key is set or the call fails."""
     api_key = os.getenv("ELEVENLABS_API_KEY")
     if not api_key:
-        return False
-    AUDIO_PATH.parent.mkdir(parents=True, exist_ok=True)
+        return None
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             resp = await client.post(
@@ -75,15 +85,25 @@ async def _speak(text: str) -> bool:
                 headers={"xi-api-key": api_key, "Content-Type": "application/json"},
                 json={
                     "text": text,
-                    "model_id": "eleven_monolingual_v1",
+                    "model_id": model_id,
                     "voice_settings": {"stability": 0.5, "similarity_boost": 0.5},
                 },
             )
             resp.raise_for_status()
-            AUDIO_PATH.write_bytes(resp.content)
-            return True
+            return resp.content
         except Exception:
-            return False
+            return None
+
+
+async def _speak(text: str) -> bool:
+    """Generate TTS audio and save it to static/audio.mp3.
+    Returns True on success, False if TTS is unavailable."""
+    audio = await _tts_bytes(text)
+    if audio is None:
+        return False
+    AUDIO_PATH.parent.mkdir(parents=True, exist_ok=True)
+    AUDIO_PATH.write_bytes(audio)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +112,15 @@ async def _speak(text: str) -> bool:
 
 @app.get("/")
 async def root():
+    """Serve the web UI. Falls back to a JSON health response if the file is missing."""
+    if INDEX_PATH.exists():
+        return FileResponse(INDEX_PATH, media_type="text/html")
+    return {"status": "ok", "service": "Wise Agent"}
+
+
+@app.get("/health")
+async def health():
+    """Lightweight health check for uptime monitors and platform probes."""
     return {"status": "ok", "service": "Wise Agent"}
 
 
@@ -195,6 +224,23 @@ async def deposit(req: DepositRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/speak")
+async def speak(req: SpeakRequest):
+    """Synthesise speech from text and stream back MP3 audio.
+
+    Returns 503 if no ELEVENLABS_API_KEY is configured; the frontend then
+    falls back to the browser's built-in speech synthesis."""
+    if not req.text.strip():
+        raise HTTPException(status_code=400, detail="text cannot be empty")
+    audio_bytes = await _tts_bytes(req.text, req.model or ELEVENLABS_MODEL)
+    if audio_bytes is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Text-to-speech unavailable. Set ELEVENLABS_API_KEY to enable it.",
+        )
+    return Response(content=audio_bytes, media_type="audio/mpeg")
 
 
 @app.get("/audio")
