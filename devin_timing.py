@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from datetime import timedelta, timezone
 from urllib.parse import urlparse
 
 import httpx
@@ -33,6 +34,9 @@ def configured():
 
 
 def evidence(plan, quote, context_id, now):
+    window_start = now.astimezone(timezone.utc).replace(hour=17, minute=0, second=0, microsecond=0)
+    if now >= window_start:
+        window_start += timedelta(days=1)
     return {
         "context_id": context_id, "pair": PAIR, "checked_at": now.isoformat(),
         "amount_eur": plan["amount"], "favorable_target": plan["target_rate"],
@@ -43,7 +47,8 @@ def evidence(plan, quote, context_id, now):
         "previous_decisions": [{"at": event["at"], "action": event.get("ai_action"),
                                 "reason": event.get("ai_reasoning")}
                                for event in plan["events"] if event.get("ai_reasoning")][-3:],
-        "next_scheduled_check": "Daily between 17:00 and 18:00 UTC; not intraday pricing.",
+        "next_scheduled_window": {"start": window_start.isoformat(), "end": (window_start + timedelta(hours=1)).isoformat()},
+        "schedule_note": "Next future daily window; a currently running window may already have fired. Schedule timing is best-effort. ECB observations are daily, usually unchanged on weekends.",
     }
 
 

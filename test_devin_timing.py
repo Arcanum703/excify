@@ -1,7 +1,8 @@
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
-from devin_timing import AIUnavailable, configuration, session_decision, start_session
+from devin_timing import AIUnavailable, configuration, evidence, session_decision, start_session
 
 
 class DevinClientTests(unittest.IsolatedAsyncioTestCase):
@@ -22,6 +23,21 @@ class DevinClientTests(unittest.IsolatedAsyncioTestCase):
     def test_service_key_uses_org_scoped_api(self):
         with patch.dict("os.environ", {"DEVIN_API_KEY": "cog_test_only"}):
             self.assertEqual(configuration()[0], "https://api.devin.ai/v3/organizations/org-test/sessions")
+
+    def schedule_context(self, hour):
+        plan = {"amount": "100", "target_rate": "380", "minimum_rate": "350",
+                "deadline": "2026-09-20T23:59:00Z", "strategy": "optimal", "events": []}
+        quote = {"rate": 364.28, "date": "2026-09-18", "source": "Frankfurter / ECB"}
+        return evidence(plan, quote, "schedule-test", datetime(2026, 9, 19, hour, tzinfo=timezone.utc))
+
+    def test_ai_gets_same_day_upcoming_window_before_17_utc(self):
+        context = self.schedule_context(12)
+        self.assertEqual(context["next_scheduled_window"]["start"], "2026-09-19T17:00:00+00:00")
+        self.assertEqual(context["next_scheduled_window"]["end"], "2026-09-19T18:00:00+00:00")
+
+    def test_ai_gets_next_day_window_after_daily_window(self):
+        context = self.schedule_context(19)
+        self.assertEqual(context["next_scheduled_window"]["start"], "2026-09-20T17:00:00+00:00")
 
     async def test_session_has_bounded_access_and_secret_delivery(self):
         request = AsyncMock(return_value={"session_id": "devin-test-session"})
