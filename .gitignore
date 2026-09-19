@@ -29,6 +29,10 @@ env/
 *.log
 *.mp3
 static/audio.mp3
+.devin/
+.vercel/
+.excify/
+*.sqlite3
 
 # === OS / editor cruft ===
 .DS_Store
@@ -38,3 +42,5 @@ desktop.ini
 .vscode/
 *.swp
 *~
+.vercel
+.env*

@@ -1,174 +1,119 @@
-# Wise Agent
+# Excify Autopilot
 
-An AI-powered currency exchange agent. It watches EUR/USD rates, learns when you usually exchange money, and acts automatically when it spots a better rate.
+**Set a target. Protect your minimum. Let the agent check rates while you are away.**
 
----
+Live demo: https://excify-livid.vercel.app
 
-## REQUIREMENTS
+Excify is an independent EUR → USD exchange-planning prototype, not affiliated with Wise. It uses real, dated ECB reference rates and performs **simulated exchanges only**. It does not hold funds, contact a bank, or move real money.
 
-- Python 3.10 or higher ([download here](https://www.python.org/downloads/))
-- Windows PowerShell or Mac/Linux Terminal
+## One complete flow
 
----
+1. Enter an amount and review the reference-rate conversion.
+2. Confirm a simulated exchange to receive a persistent receipt, or activate an autopilot plan.
+3. Set your favorable target, protected minimum, deadline, and strategy.
+4. Pause/resume a plan, inspect its decision log, and return later to its saved result.
+5. Test the same rules against seven real historical observations using the clearly labeled replay.
 
-## SETUP STEPS
+The dashboard retains the original vanilla HTML/CSS/JavaScript and Python/FastAPI stack. No frontend framework or paid FX API is required.
 
-**Step 1: Get the project folder**
+## What is real, and what is simulated?
 
-Download or copy the `wise-agent` folder to your computer. It should contain `main.py`, `agent.py`, `rates.py`, and `requirements.txt`.
+| Component | Behavior |
+| --- | --- |
+| Rates and history | Real Frankfurter v1 / European Central Bank daily reference observations; source and date displayed |
+| Market timing | Deterministic, auditable rules, not a prediction of the best future price |
+| Background checks | Vercel Cron, daily between 17:00 and 18:00 UTC in production; works with the browser closed |
+| Plan state and receipts | Private Vercel Blob with conditional writes; SQLite for local development without Blob credentials |
+| Execution | Simulation at a reference rate; fees, spreads, settlement, and bank transfers are not modeled |
+| Historical replay | Uses actual past observations and only earlier observations for its benchmark; does not change saved plans |
+| AI | Execution is rule-based. Optional legacy Cerebras chat is local-only. Devin analysis is not connected yet. No LLM is required or claimed for these decisions. |
+| Bundled transaction history | Sample data from the original prototype; not used as the current market benchmark |
 
-**Step 2: Open PowerShell and navigate to the folder**
+## Execution rules, in priority order
 
-On Windows, open PowerShell and type:
-```
-cd wise-agent
-```
+1. **Finished plans stay finished.** Repeated jobs cannot execute a completed plan again.
+2. **Deadline reached:** expire without a late exchange. Resuming does not extend the deadline.
+3. **Paused:** no execution.
+4. **Unavailable, invalid, or stale rate:** hold safely. No fabricated fallback rates.
+5. **Below the protected minimum:** never exchange, regardless of deadline or strategy.
+6. **At or above the favorable target:** execute a simulation.
+7. **Optimal mode, final 36 hours:** accept an eligible rate at or above the minimum.
+8. **Optimal mode, otherwise:** execute when the rate meets the upper-quartile benchmark of prior observations from the recent 30 calendar days.
+9. Otherwise, hold. Target-only mode never relaxes its target.
 
-On Mac/Linux, open Terminal and type:
-```
-cd wise-agent
-```
+Rates must have a valid positive value, a provider date no more than four calendar days old (allowing weekends/holidays), and a server snapshot no more than 30 minutes old. Longer holiday gaps fail closed rather than inventing a price. Reference data is cached for ten minutes. Free daily scheduling requires a deadline between 26 hours and 90 days ahead; the dashboard uses the end of the selected UTC date. This is not exact-minute scheduling or intraday market monitoring.
 
-**Step 3: Install dependencies**
+## Run locally
 
-```
-pip install -r requirements.txt
-```
+Python 3.13 recommended; use an isolated virtual environment.
 
-This downloads all the Python packages the project needs. It may take a minute.
-
-**Step 4: Set your API keys**
-
-The easiest way is to create a file named `.env` in the project folder (copy `.env.example`) and fill in your keys:
-```
-CEREBRAS_API_KEY=your_key_here
-ELEVENLABS_API_KEY=your_key_here
-```
-The app loads this file automatically on startup.
-
-Alternatively, set them as environment variables:
-
-On Windows (PowerShell):
-```
-$env:CEREBRAS_API_KEY="your_key_here"
-$env:ELEVENLABS_API_KEY="your_key_here"
+```sh
+python -m venv .venv
 ```
 
-On Mac/Linux (Terminal):
-```
-export CEREBRAS_API_KEY="your_key_here"
-export ELEVENLABS_API_KEY="your_key_here"
-```
+Windows:
 
-Replace `your_key_here` with your actual keys (see API KEYS section below).
-
-**Step 5: Start the server**
-
-```
-python -m uvicorn main:app --port 8000
+```powershell
+.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python -m uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-You should see a message like `Uvicorn running on http://0.0.0.0:8000`. That means it is working.
+macOS/Linux:
 
-**Step 6: Check it is running**
-
-Open your browser and go to:
-```
-http://localhost:8000
+```sh
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-You should see the **Excify web app**. (For a plain health check, visit `http://localhost:8000/health` — it returns `{"status":"ok","service":"Wise Agent"}`.)
+Open http://127.0.0.1:8000. No keys are needed locally. Without a Blob token, state lives in ignored `.excify/plans.sqlite3`; there is no automatic local scheduler. Use **Check now** or invoke the authenticated job endpoint. `.env` and `.env.local` are loaded if present and must never be committed.
 
----
+## Verify
 
-## API KEYS NEEDED
-
-You need two API keys to run this project:
-
-- **CEREBRAS_API_KEY** — powers the AI chat agent (Llama 3.3 70B via Cerebras)
-  Get it free from: https://cloud.cerebras.ai
-
-- **ELEVENLABS_API_KEY** — used for text-to-speech audio (optional)
-  Get it from: https://elevenlabs.io/app/developers
-  Without it, the voice features fall back to your browser's built-in speech.
-
-Or ask Sami for the keys.
-
----
-
-## HOW TO TEST
-
-Open a **second** PowerShell or Terminal window (keep the server running in the first one).
-
-**On Windows (PowerShell):**
-```
-Invoke-RestMethod -Uri "http://localhost:8000/deposit" -Method POST -ContentType "application/json" -Body '{"amount_eur": 1200}'
+```sh
+python -m unittest test_autopilot test_api test_store test_market -v
+node --check static/app.js
 ```
 
-**On Mac/Linux (Terminal):**
-```
-curl -X POST http://localhost:8000/deposit -H "Content-Type: application/json" -d '{"amount_eur": 1200}'
-```
+Tests cover the protected floor, exact threshold boundaries, deadline behavior, pause/resume, stale data, input validation, isolated sessions, persistent storage, duplicate execution, a worker request without browser cookies, and the Blob HTTP contract (including strong ETags and pagination). Unit/API tests use temporary SQLite and mocked rates: no provider keys or cloud writes.
 
----
+The original `test_pattern.py` is an exploratory sample-history script, not the regression test suite.
 
-## WHAT YOU SHOULD SEE
+## Vercel deployment
 
-The response is a JSON object. Here is what each field means:
+1. Create a Vercel FastAPI project and connect a **private** Blob store.
+2. Make `BLOB_READ_WRITE_TOKEN` and `BLOB_STORE_ID` available to the appropriate environments. The token is server-only.
+3. Generate a strong random `CRON_SECRET` and add it to Production. Never put it in the repository or browser code.
+4. Deploy this directory. `vercel.json` schedules `GET /api/cron` daily; Vercel supplies `Authorization: Bearer <CRON_SECRET>`.
+5. Verify `/health`, create a plan, trigger the deployed cron, and inspect the server heartbeat and persisted last-check time. A page refresh or an open browser is not the scheduler.
 
-```json
-{
-  "status": "EXECUTED",              -- What the agent decided: EXECUTED, HOLDING, or MONITORING
-  "user": "Sami",                    -- The user whose pattern was analysed
-  "deposited": "EUR 1,200.00",       -- The amount you sent in euros
-  "rate_today": 1.0958,              -- The EUR/USD exchange rate right now
-  "rate_friday_average": 1.0938,     -- Sami's average rate, computed from history
-  "rate_difference": "+1.46%",       -- How much better (or worse) today's rate is
-  "profit_loss": "+$17.56 (profit)", -- Money gained by acting today instead of Friday
-  "insight": "Agent acted 2 days before your usual Friday, saving you money",
-  "pattern": "Exchanges every Friday between 09:00-14:00 (92% confidence)",
-  "agent_reasoning": "You usually wait until Friday...", -- Full explanation from the agent
-  "audio_url": "/static/audio.mp3"   -- Play this URL to hear the reasoning out loud
-}
-```
+Hobby Blob is free within its limits and blocks access rather than charging overages. Monitor usage: this prototype limits sessions to ten saved plans and refuses new sessions at its demo capacity. It is not a production banking ledger. Deployment protection must allow the intended audience to open the production URL; do not expose store credentials to bypass it.
 
-To play the audio, open this in your browser after calling /deposit:
-```
-http://localhost:8000/static/audio.mp3
-```
+The old Render configuration remains as an alternative HTTP host, but does not configure an unattended worker by itself. Do not claim background operation on Render without arranging a scheduler.
 
----
+## API and architecture
 
-## OTHER ENDPOINTS
+| Route | Purpose |
+| --- | --- |
+| `GET /api/market` | Dated quote, historical observations, benchmark and freshness |
+| `GET /api/state` | Private browser-session plans and global scheduler heartbeat |
+| `POST /api/plans` | Authorize a saved autopilot plan and check immediately |
+| `PATCH /api/plans/{id}` | Pause/resume only a plan in the current session |
+| `POST /api/plans/{id}/check` | Manual check, limited to once per five minutes |
+| `POST /api/exchange` | Explicit simulated exchange with an idempotency key |
+| `POST /api/replay` | Historical evaluation, never saved as a live plan |
+| `GET /api/cron` | Secret-protected server job, independent of browser cookies |
+| `POST /convert` | Validated reference conversion for provider-supported currencies |
+| `POST /deposit` | Legacy quote-only endpoint; does not claim execution |
+| `GET /history` | Explicitly labeled bundled sample history |
+| `GET /health` | Health check |
 
-| Method | URL | What it does |
-|--------|-----|--------------|
-| GET | `/` | The Excify web app (UI) |
-| GET | `/health` | Health check (JSON) |
-| GET | `/rate` | Current live EUR/USD rate |
-| GET | `/history` | Sami's past transactions |
-| GET | `/audio` | Play the last generated audio |
-| POST | `/deposit` | Run the agent with an amount in EUR |
-| POST | `/speak` | Text-to-speech: returns MP3 audio for given text |
-| POST | `/convert` | Convert an amount between two currencies |
-| POST | `/chat` | Chat with the AI agent (Cerebras) |
+`autopilot.py` is the pure decision engine. `market.py` owns verified provider data. `plan_store.py` implements optimistic concurrency. `autopilot_api.py` combines session isolation, confirmations, state transitions, replay, and the worker. `main.py` serves the app and legacy endpoints. `static/app.js` renders server results rather than overriding decisions.
 
----
+Anonymous demo sessions use opaque, HttpOnly, SameSite cookies (Secure in deployment); the store uses only their hashes. Losing cookies loses access to that session, but does not cancel server-side plans. Pause plans before clearing cookies. Concurrent pause/job writes are retried against the latest stored state. State changes and receipts are stored in the same conditional write. Development, preview, and production use separate storage namespaces so a production job cannot execute a development plan.
 
-## DEPLOY (free, one service)
+## Demo script
 
-The app serves both the API and the web UI, so it deploys as a single service.
-It's preconfigured for **Render** via `render.yaml`.
-
-1. Push this repo to GitHub (already done if you cloned it from there).
-2. Go to https://dashboard.render.com → **New** → **Blueprint**.
-3. Select this repository. Render reads `render.yaml` and creates the service.
-4. In the service's **Environment** tab, add your two secrets:
-   - `CEREBRAS_API_KEY`
-   - `ELEVENLABS_API_KEY`
-5. Click **Deploy**. When it goes live, open the Render URL — that's your app.
-
-Notes:
-- The free tier sleeps after ~15 min idle; the first request then takes ~50s to wake.
-- The start command binds to `$PORT` (set by the host); locally it defaults to 8000.
-- A `Procfile` is also included for Railway / other Heroku-style platforms.
+- Convert EUR 1,200, review the date/source, confirm a simulation, and refresh to show its saved receipt.
+- Create a **Target only** plan with a target above the current quote and a minimum below it. Show that it is waiting; pause and resume it.
+- Switch to **Optimal**, choose sensible bounds around the visible historical range, and replay the recent observations. Explain each decision and the hard minimum.
+- Show the server schedule and last successful worker run. Clearly separate real reference data, historical replay, and simulated execution.

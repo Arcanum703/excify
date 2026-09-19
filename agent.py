@@ -99,21 +99,10 @@ async def generate_reasoning(
     rate_low: float = 0.0,
     rate_high: float = 0.0,
 ) -> str:
-    if decision == "execute":
-        return (
-            f"You usually wait until Friday to exchange. But today is Wednesday "
-            f"and the rate is {current_rate} USD per EUR - better than your typical Friday "
-            f"average of {avg_rate}. I executed 2 days early. You saved ${savings:.2f} by not waiting."
-        )
-    if decision == "hold":
-        return (
-            f"Today is Wednesday. Current rate is {current_rate} USD per EUR - below "
-            f"your Friday average of {avg_rate}. I am holding. Friday may bring a better rate. "
-            f"Executing now would cost you ${avoided_loss:.2f} extra."
-        )
     return (
-        f"Rates are swinging unusually this week between {rate_low} and {rate_high} USD per EUR. "
-        f"I am monitoring closely and will execute before Friday if a good window appears."
+        f"Reference rate: {current_rate} USD per EUR. Historical comparison: {avg_rate}. "
+        f"Rule-based assessment: {decision}. This is not a forecast or a real exchange. "
+        "Autopilot execution is controlled by the explicitly authorized plan and its protected minimum."
     )
 
 

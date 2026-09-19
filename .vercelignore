@@ -1,0 +1,11 @@
+.git
+.venv
+.vercel
+.devin
+.excify
+__pycache__
+.env
+.env.*
+*.sqlite3
+*.pyc
+*.log
