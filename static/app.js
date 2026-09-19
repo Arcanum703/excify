@@ -33,7 +33,7 @@ async function fetchLiveRate() {
   try {
     market = await api('/api/market');
     $('liveRate').textContent = rateFmt(market.rate);
-    $('rateDate').textContent = `1 EUR = ${rateFmt(market.rate)} USD · published ${market.date}`;
+    $('rateDate').textContent = `1 EUR = ${rateFmt(market.rate)} HUF · published ${market.date}`;
     $('mRateToday').textContent = rateFmt(market.rate);
     $('mRateAvg').textContent = rateFmt(market.average_rate);
     const difference = market.average_rate ? (market.rate / market.average_rate - 1) * 100 : null;
@@ -53,14 +53,27 @@ async function fetchLiveRate() {
     showError(error);
   }
 }
+let chartModel = {points:[], markers:[]};
 function drawChart(points) {
-  const values = points.map(p => p.rate), low = Math.min(...values), high = Math.max(...values), range = high - low || 0.01;
-  const xy = points.map((point, index) => [12 + index / Math.max(points.length - 1, 1) * 476, 145 - (point.rate - low) / range * 120]);
-  const path = xy.map(([x,y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
-  $('rateChart').innerHTML = `<line x1="12" y1="145" x2="488" y2="145" stroke="#e2e8f0"/><polygon points="12,160 ${path} 488,160" fill="#e8faf0"/><polyline points="${path}" fill="none" stroke="#50872d" stroke-width="3" stroke-linejoin="round"/><circle cx="${xy.at(-1)[0]}" cy="${xy.at(-1)[1]}" r="5" fill="#163300"/><text x="12" y="15" fill="#667568" font-size="10">High ${high.toFixed(4)} · Low ${low.toFixed(4)}</text>`;
-  $('chartStart').textContent = points[0].date;
-  $('chartEnd').textContent = points.at(-1).date;
+  chartModel = ExcifyChart.buildModel(points, plans);
+  $('rateChart').innerHTML = ExcifyChart.renderSvg(chartModel);
+  $('chartStart').textContent = chartModel.points[0]?.date || '';
+  $('chartEnd').textContent = chartModel.points.at(-1)?.date || '';
+  const select = $('chartDecisionSelect'), selected = select.value;
+  select.innerHTML = '<option value="">Inspect an agent decision…</option>' + chartModel.markers.map((m,i) => `<option value="${i}">${esc(m.rate_date)} · ${esc(m.label)} · EUR ${fmt(m.amount)}</option>`).join('');
+  select.disabled = !chartModel.markers.length;
+  select.value = selected;
+  $('chartDecision').textContent = chartModel.markers.length ? `${chartModel.markers.length} saved decisions plotted at their actual published rate. Choose a marker to inspect its rationale.` : 'No agent decisions yet. Activate an AI plan to add real execute/hold markers; no example markers are fabricated.';
 }
+function inspectMarker(index) {
+  const marker = chartModel.markers[Number(index)];
+  if (!marker || index === '') return;
+  $('chartDecisionSelect').value = String(index);
+  $('chartDecision').textContent = `${marker.description} Checked ${when(marker.at)}. Backend outcome: ${marker.action}. ${marker.text || ''}`;
+}
+$('chartDecisionSelect').addEventListener('change', event => inspectMarker(event.target.value));
+$('rateChart').addEventListener('click', event => { const marker = event.target.closest('[data-marker]'); if (marker) inspectMarker(marker.dataset.marker); });
+$('rateChart').addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { const marker = event.target.closest('[data-marker]'); if (marker) { event.preventDefault(); inspectMarker(marker.dataset.marker); } } });
 
 /* ── DEPOSIT INPUT PREVIEW ── */
 function updatePreview() {
@@ -68,9 +81,9 @@ function updatePreview() {
   $('receiveAmount').textContent = market && valid ? fmt(amount * market.rate) : '—';
   $('depositBtn').disabled = !valid || !market?.usable || !sessionReady;
   if (market) {
-    $('amountPreview').textContent = `EUR → USD · ${market.source} · ${market.date}`;
+    $('amountPreview').textContent = `EUR → HUF · ${market.source} · ${market.date}`;
     const delta = market.average_rate ? amount * (market.rate - market.average_rate) : 0;
-    $('reasoningText').textContent = valid && market.average_rate ? `For EUR ${fmt(amount)}, today’s reference quote is USD ${fmt(Math.abs(delta))} ${delta >= 0 ? 'higher' : 'lower'} than conversion at the recent historical average. This is a comparison, not a prediction or realized profit.` : 'Enter an amount to see the difference against the recent historical average.';
+    $('reasoningText').textContent = valid && market.average_rate ? `For EUR ${fmt(amount)}, today’s reference quote is HUF ${fmt(Math.abs(delta))} ${delta >= 0 ? 'higher' : 'lower'} than conversion at the recent historical average. This is a comparison, not a prediction or realized profit.` : 'Enter an amount to see the difference against the recent historical average.';
   }
 }
 /* ── RULES OVERRIDE ── */
@@ -82,28 +95,42 @@ function planInput() {
 }
 /* ── TYPEWRITER ── */
 function renderEvents(events) {
-  return events.map(event => `<li><time>${esc(when(event.at))}${event.rate != null ? ` · ${rateFmt(event.rate)} USD/EUR` : ''}</time>${esc(event.text)}</li>`).join('');
+  return events.map(event => `<li><time>${esc(when(event.at))}${event.rate != null ? ` · ${rateFmt(event.rate)} HUF/EUR · observation ${esc(event.rate_date || '')}` : ''}</time>${event.ai_action ? `<strong>Devin chose: ${esc(event.ai_action.toUpperCase())}</strong><p class="ai-rationale">${esc(event.ai_reasoning)}</p>` : ''}<p><strong>${event.action ? `Backend: ${esc(event.action.toUpperCase())}. ` : ''}</strong>${esc(event.text)}</p>${event.session_id ? `<p class="muted">Devin session: ${esc(event.session_id)}</p>` : ''}${event.authority ? `<p class="muted">${esc(event.authority)}</p>` : ''}</li>`).join('');
 }
 /* ── STATUS BADGE ── */
 function statusBadge(status) { return `<span class="status-badge ${esc(status)}">${esc(status === 'completed' ? 'Simulated exchange' : status)}</span>`; }
 /* ── OUTCOME ── */
 function receiptMarkup(receipt) {
   if (!receipt) return '';
-  return `<div class="receipt"><span class="metric-label">Simulation receipt · no money moved</span><strong>EUR ${fmt(receipt.sent_eur)} → USD ${fmt(receipt.received_usd)}</strong><p class="muted">${rateFmt(receipt.rate)} USD/EUR · rate dated ${esc(receipt.rate_date)} · ${esc(receipt.source)}</p><p class="muted">${esc(receipt.fees)}</p><p class="muted" style="word-break:break-all">${esc(receipt.id)}</p></div>`;
+  return `<div class="receipt"><span class="metric-label">Simulation receipt · no money moved</span><strong>EUR ${fmt(receipt.sent_eur)} → HUF ${fmt(receipt.received_huf)}</strong><p class="muted">${rateFmt(receipt.rate)} HUF/EUR · rate dated ${esc(receipt.rate_date)} · ${esc(receipt.source)}</p><p class="muted">${esc(receipt.fees)}</p><p class="muted" style="word-break:break-all">${esc(receipt.id)}</p></div>`;
 }
 /* ── HISTORY ── */
 function renderPlans(data) {
-  plans = data.plans || [];
-  $('planList').innerHTML = plans.length ? plans.map(plan => `<article class="plan-card"><div class="card-heading"><h3>EUR ${fmt(plan.amount)} → USD</h3>${statusBadge(plan.status)}</div><div class="plan-meta"><div><span class="metric-label">Favorable target</span><strong>${rateFmt(plan.target_rate)}</strong></div><div><span class="metric-label">Protected minimum</span><strong>${rateFmt(plan.minimum_rate)}</strong></div><div><span class="metric-label">Deadline · UTC</span><strong>${esc(plan.deadline.slice(0,10))}</strong></div></div><p class="plan-reason">${esc(plan.reason)}</p><p class="muted" style="margin-top:10px">${plan.strategy === 'optimal' ? 'Optimal' : 'Target only'} · Last check: ${esc(when(plan.last_checked_at))}</p>${receiptMarkup(plan.receipt)}${['active','paused'].includes(plan.status) ? `<div class="button-row"><button class="btn-secondary" data-action="toggle" data-id="${esc(plan.id)}" role="switch" aria-checked="${plan.status === 'active'}">Autopilot ${plan.status === 'active' ? 'ON — pause' : 'OFF — resume'}</button><button class="btn-secondary" data-action="check" data-id="${esc(plan.id)}" ${plan.status === 'paused' ? 'disabled' : ''}>Check now</button></div>` : ''}<details><summary>Decision log (${plan.events.length})</summary><ol class="timeline">${renderEvents(plan.events)}</ol></details></article>`).join('') : '<div class="history-empty"><strong>No plans yet.</strong><p class="muted">Activate autopilot or confirm a simulated exchange to start.</p></div>';
+  plans = (data.plans || []).filter(plan => plan.pair === 'EUR/HUF');
+  $('planList').innerHTML = plans.length ? plans.map((plan,index) => {
+    const lastAI = plan.events.findLast(event => event.ai_action);
+    return `<article class="plan-card"><div class="card-heading"><h3>EUR ${fmt(plan.amount)} → HUF</h3>${statusBadge(plan.pending_ai && plan.status === 'active' ? 'AI analyzing' : plan.status)}</div>
+      <p class="muted">AI-directed timing, rule-enforced safety limits</p>
+      <div class="plan-meta"><div><span class="metric-label">Favorable target</span><strong>${rateFmt(plan.target_rate)}</strong></div><div><span class="metric-label">Protected minimum</span><strong>${rateFmt(plan.minimum_rate)}</strong></div><div><span class="metric-label">Deadline · UTC</span><strong>${esc(plan.deadline.slice(0,10))}</strong></div></div>
+      <p class="plan-reason">${esc(plan.reason)}</p>
+      ${lastAI ? `<p class="ai-verdict">AI proposal: <strong>${esc(lastAI.ai_action.toUpperCase())}</strong> · Backend result: <strong>${esc(lastAI.action.toUpperCase())}</strong></p>` : ''}
+      ${plan.pending_ai ? `<p class="muted">Analysis requested ${esc(when(plan.pending_ai.created_at))}. No execution occurs until a valid AI result passes the safety checks.</p>` : ''}
+      <p class="muted" style="margin-top:10px">${plan.strategy === 'optimal' ? 'AI optimal timing' : 'AI timing above target only'} · Last completed check: ${esc(when(plan.last_checked_at))}</p>
+      ${receiptMarkup(plan.receipt)}
+      ${['active','paused'].includes(plan.status) ? `<div class="button-row"><button class="btn-secondary" data-action="toggle" data-id="${esc(plan.id)}" role="switch" aria-checked="${plan.status === 'active'}">Autopilot ${plan.status === 'active' ? 'ON — pause' : 'OFF — resume'}</button><button class="btn-secondary" data-action="check" data-id="${esc(plan.id)}" ${plan.status === 'paused' ? 'disabled' : ''}>${plan.pending_ai ? 'Check AI result' : 'Ask AI to recheck'}</button></div>` : ''}
+      <details ${index === 0 && lastAI ? 'open' : ''}><summary>Decision trail (${plan.events.length})</summary><ol class="timeline">${renderEvents(plan.events)}</ol></details></article>`;
+  }).join('') : '<div class="history-empty"><strong>No EUR/HUF plans yet.</strong><p class="muted">Activate autopilot to request a real AI timing decision.</p></div>';
   const completed = plans.filter(plan => plan.receipt);
-  $('historyList').innerHTML = completed.length ? completed.slice(0,3).map(plan => `<div class="history-item"><div><strong>EUR ${fmt(plan.amount)}</strong><p class="muted">${esc(when(plan.receipt.executed_at))}</p></div><div style="text-align:right"><strong class="positive">USD ${fmt(plan.receipt.received_usd)}</strong><p class="muted">Simulated</p></div></div>`).join('') : '<div class="history-empty">Your first simulated exchange starts here.</div>';
+  $('historyList').innerHTML = completed.length ? completed.slice(0,3).map(plan => `<div class="history-item"><div><strong>EUR ${fmt(plan.amount)}</strong><p class="muted">${esc(when(plan.receipt.executed_at))}</p></div><div style="text-align:right"><strong class="positive">HUF ${fmt(plan.receipt.received_huf)}</strong><p class="muted">${plan.receipt.authority === 'User-confirmed simulation' ? 'User-confirmed' : 'AI-directed'} simulation</p></div></div>`).join('') : '<div class="history-empty">Your first simulated exchange starts here.</div>';
+  if (market) drawChart(market.history);
 }
 async function refreshPlans() {
   try {
     const state = await api('/api/state');
     sessionReady = true;
     renderPlans(state);
-    $('schedulerStatus').textContent = state.background_enabled ? 'Daily checks run on Vercel between 17:00 and 18:00 UTC, even with this browser closed. Activation and resume also check immediately.' : 'Background scheduling is not active in this environment. Saved plans work, but only manual checks run here.';
+    $('aiStatus').textContent = state.ai_configured ? 'Devin configured · AI has execute/wait authority within your safety limits.' : 'Devin is not configured. Autonomous plans hold safely; no rule-based execution fallback.';
+    $('schedulerStatus').textContent = state.background_enabled ? 'Vercel requests AI checks daily between 17:00 and 18:00 UTC. Devin delivers decisions back to the server, even with your browser closed. Activation and resume request a check too.' : 'Local/preview mode: no background scheduler or production callback. Use Check AI result to collect a pending decision.';
     const heartbeat = state.heartbeat;
     const old = heartbeat && Date.now() - new Date(heartbeat.checked_at).getTime() > 27 * 3600000;
     $('schedulerHeartbeat').textContent = heartbeat ? `Last server run: ${when(heartbeat.checked_at)} · ${old ? 'OVERDUE — monitoring needs attention' : heartbeat.status === 'ok' ? 'Healthy' : 'Degraded — some checks could not complete'}` : 'First server check not yet verified.';
@@ -131,7 +158,7 @@ function runDeposit() {
   if (!$('amountInput').reportValidity() || !market?.usable || !sessionReady) return;
   const amount = Number($('amountInput').value);
   if (!pendingExchange || pendingExchange.amount !== amount) pendingExchange = {amount, confirmation:true, request_id:crypto.randomUUID()};
-  $('confirmAmount').textContent = `EUR ${fmt(amount)} → USD ${fmt(amount * market.rate)}`;
+  $('confirmAmount').textContent = `EUR ${fmt(amount)} → HUF ${fmt(amount * market.rate)}`;
   $('confirmRate').textContent = `Reference rate: ${rateFmt(market.rate)} · ${market.date}`;
   $('dialogError').textContent = '';
   $('exchangeDialog').showModal();
@@ -194,7 +221,7 @@ $('predDeadline').max = new Date(Date.now() + 89 * 86400000).toISOString().slice
   /* ── Speak: backend /speak (ElevenLabs turbo_v2) or browser fallback ── */
   function speakText(text) { $('voiceTranscript').textContent = text; playAudio(text); }
   /* ── Last-month average from Frankfurter ── */
-  function averageText() { return market?.average_rate ? `Recent historical average: ${rateFmt(market.average_rate)} USD per EUR.` : 'Historical rates are unavailable.'; }
+  function averageText() { return market?.average_rate ? `Recent historical average: ${rateFmt(market.average_rate)} HUF per EUR.` : 'Historical rates are unavailable.'; }
   /* ── Intent dispatcher ── */
   function handleTranscript(raw) {
     const text = raw.toLowerCase(); $('voiceTranscript').textContent = `Heard: ${raw}`;
@@ -205,7 +232,7 @@ $('predDeadline').max = new Date(Date.now() + 89 * 86400000).toISOString().slice
     /* INTENT 3 — Last month average (Frankfurter) */
     if (/average|history/.test(text)) { speakText(averageText()); return; }
     /* INTENT 2 — Live rate */
-    if (/rate|current/.test(text)) { speakText(market?.usable ? `Reference rate: ${rateFmt(market.rate)} USD per EUR, dated ${market.date}.` : 'A verified rate is unavailable.'); return; }
+    if (/rate|current/.test(text)) { speakText(market?.usable ? `Reference rate: ${rateFmt(market.rate)} HUF per EUR, dated ${market.date}.` : 'A verified rate is unavailable.'); return; }
     /* INTENT 4 — Status */
     if (/status|monitor/.test(text)) { speakText(`${plans.filter(p => p.status === 'active').length} active plans in this session.`); return; }
     /* INTENT — Compare yesterday vs today */
@@ -223,4 +250,14 @@ $('predDeadline').max = new Date(Date.now() + 89 * 86400000).toISOString().slice
 })();
 Promise.all([fetchLiveRate(), refreshPlans()]);
 setInterval(() => { if (!document.hidden) { fetchLiveRate(); refreshPlans(); } }, 600000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshPlans(); });
+let checkingPending = false;
+setInterval(async () => {
+  if (document.hidden || checkingPending || !plans.some(plan => plan.pending_ai)) return;
+  checkingPending = true;
+  try {
+    for (const plan of plans.filter(plan => plan.pending_ai)) renderPlans(await api(`/api/plans/${plan.id}/check`, {}));
+    await refreshPlans();
+  } catch (error) { showError(error); }
+  finally { checkingPending = false; }
+}, 15000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { fetchLiveRate(); refreshPlans(); } });

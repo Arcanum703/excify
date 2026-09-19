@@ -8,7 +8,7 @@ from pathlib import Path
 
 import httpx
 
-PREFIX = "excify-v1/"
+PREFIX = "excify-eur-huf-ai-v2/"
 
 
 class StoreConflict(Exception):
@@ -21,7 +21,7 @@ class StoreUnavailable(Exception):
 
 class LocalStore:
     def __init__(self, path=None):
-        self.path = Path(path or ".excify/plans.sqlite3")
+        self.path = Path(path or ".excify/eur-huf-ai.sqlite3")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
             db.execute("CREATE TABLE IF NOT EXISTS records (id TEXT PRIMARY KEY, version INTEGER NOT NULL, data TEXT NOT NULL)")
@@ -132,7 +132,7 @@ def get_store():
 
 
 async def update_record(key, transform):
-    if not re.fullmatch(r"(?:account-[a-f0-9]{64}|heartbeat)", key):
+    if not re.fullmatch(r"(?:account-[a-f0-9]{64}|heartbeat|ai-budget-\d{4}-\d{2}-\d{2})", key):
         raise ValueError("Invalid record key")
     store = get_store()
     for attempt in range(5):

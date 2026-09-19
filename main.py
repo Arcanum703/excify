@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+from typing import Literal
 
 import httpx
 from dotenv import load_dotenv
@@ -27,7 +28,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 ELEVENLABS_URL = "https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM"
 ELEVENLABS_MODEL = "eleven_turbo_v2"
 
-app = FastAPI(title="Excify Autopilot", description="Reference-rate exchange planning and autonomous simulated execution", version="2.0.0")
+app = FastAPI(title="Excify Autopilot", description="AI-directed EUR/HUF timing with rule-enforced safety limits and simulated execution", version="3.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=[], allow_methods=["GET", "POST", "PATCH"], allow_headers=["Content-Type", "X-Excify-Intent"])
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.include_router(router)
@@ -78,8 +79,8 @@ class ChatResponse(BaseModel):
 
 class ConvertRequest(BaseModel):
     amount: float = Field(gt=0, le=1000000, allow_inf_nan=False)
-    from_currency: str = Field(pattern=r"^[A-Za-z]{3}$")
-    to_currency: str = Field(pattern=r"^[A-Za-z]{3}$")
+    from_currency: Literal["EUR"] = "EUR"
+    to_currency: Literal["HUF"] = "HUF"
 
 
 class DepositRequest(BaseModel):
@@ -135,9 +136,9 @@ async def health():
 
 @app.get("/rate")
 async def rate():
-    """Return the dated EUR/USD reference rate."""
+    """Return the dated EUR/HUF reference rate."""
     quote = await get_market()
-    return {"from": "EUR", "to": "USD", "rate": quote["rate"], "date": quote["date"], "source": quote["source"]}
+    return {"from": "EUR", "to": "HUF", "rate": quote["rate"], "date": quote["date"], "source": quote["source"]}
 
 
 @app.get("/history")
@@ -160,7 +161,7 @@ async def _reference_rates():
 async def deposit(req: DepositRequest):
     """Return a quote; execution requires explicit confirmation via /api/exchange."""
     quote, low, high = await _reference_rates()
-    conversion = await convert(req.amount_eur, "EUR", "USD")
+    conversion = await convert(req.amount_eur, "EUR", "HUF")
     return {**conversion, "status": "QUOTED", "rate_today": quote["rate"],
             "historical_low": low, "historical_high": high,
             "agent_reasoning": "This is a reference-rate quote, not an executed transaction. Confirm a simulated exchange or activate an autopilot plan."}
@@ -199,7 +200,7 @@ async def convert_currency(req: ConvertRequest):
 async def chat_endpoint(req: ChatRequest):
     """Optional Cerebras chat, separate from deterministic execution rules."""
     if not os.getenv("CEREBRAS_API_KEY") or os.getenv("VERCEL"):
-        raise HTTPException(503, "Optional chat is disabled. Autopilot works without an AI API key.")
+        raise HTTPException(503, "Optional chat is disabled. Autonomous timing requires the configured Devin API; unavailable AI holds safely.")
     if any(m.get("role") not in ("user", "assistant") or not isinstance(m.get("content"), str)
            or len(m["content"]) > 1500 for m in req.messages):
         raise HTTPException(400, "Invalid conversation messages.")

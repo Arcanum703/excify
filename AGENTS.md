@@ -2,7 +2,11 @@
 
 - Preserve the Python/FastAPI and vanilla HTML/CSS/JavaScript stack.
 - On Windows use `.venv/Scripts/python`; on Unix use `.venv/bin/python`.
-- Regression tests: `python -m unittest test_autopilot test_api test_store test_market -v`.
+- Regression tests: `python -m unittest test_ai_timing test_autopilot test_api test_store test_market test_devin_timing -v` and `node --test test_chart.cjs`.
+- EUR/HUF is the only supported pair. Never relabel prior-pair stored amounts; use the currency-versioned storage namespace.
+- Autonomous execution needs a schema-valid final Devin decision; there is no rule-only fallback. Callback and polling paths must recheck safety against the current plan and market.
+- Live Devin tests consume the supplied account's allowance; unit/API tests must mock provider calls.
+- Never pull Vercel environment files over `.env.local`, which contains user-maintained Devin credentials.
 - JavaScript syntax check: `node --check static/app.js`.
 - Local server: `python -m uvicorn main:app --host 127.0.0.1 --port 8000`.
 - Never claim reference rates are streaming prices or simulated exchanges are real money movement.

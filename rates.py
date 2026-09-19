@@ -3,26 +3,26 @@ import datetime
 from market import get_market, get_reference_rates, reference_conversion
 
 # Reference data is shared by quotes, conversions, and autonomous checks.
-FRANKFURTER_LATEST = "https://api.frankfurter.dev/v1/latest?from=EUR&to=USD"
-FRANKFURTER_HISTORY = "https://api.frankfurter.dev/v1/{start}..{end}?from=EUR&to=USD"
+FRANKFURTER_LATEST = "https://api.frankfurter.dev/v1/latest?from=EUR&to=HUF"
+FRANKFURTER_HISTORY = "https://api.frankfurter.dev/v1/{start}..{end}?from=EUR&to=HUF"
 
 
-async def get_rates(base: str = "USD") -> dict:
+async def get_rates(base: str = "EUR") -> dict:
     """Fetch verified daily reference rates without invented fallbacks."""
     # Reject invalid currencies instead of returning rates in the wrong base.
     return (await get_reference_rates(base.upper()))["rates"]
 
 
 async def get_current_rate() -> float:
-    """Return the latest published EUR/USD reference rate."""
+    """Return the latest published EUR/HUF reference rate."""
     return (await get_market())["rate"]
 
 
 async def get_7day_average() -> float:
-    """Fetch EUR/USD observations from the last seven calendar days."""
+    """Fetch EUR/HUF observations from the last seven calendar days."""
     data = await get_market()
     cutoff = str(datetime.date.today() - datetime.timedelta(days=7))
-    daily_rates = data["history"]  # Dated EUR/USD observations from the provider.
+    daily_rates = data["history"]  # Dated EUR/HUF observations from the provider.
     values = [day["rate"] for day in daily_rates if day["date"] >= cutoff]
     if not values:
         raise ValueError("No recent historical observations available.")

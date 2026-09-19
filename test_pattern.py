@@ -21,9 +21,9 @@ for key, value in pattern.items():
 
 print()
 print("=" * 55)
-print("should_execute_now(current_rate=1.0950)")
+print("should_execute_now(current_rate=364.28)")
 print("=" * 55)
-decision = should_execute_now(1.0950, transactions)
+decision = should_execute_now(364.28, transactions)
 for key, value in decision.items():
     print(f"  {key:<30} {value}")
 

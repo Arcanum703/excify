@@ -39,10 +39,10 @@ async def fetch_json(path, params=None):
 
 async def get_market():
     now = utcnow()
-    start = (now.date() - timedelta(days=45)).isoformat()
-    data = await fetch_json(f"/{start}..", {"from": "EUR", "to": "USD"})
+    start = (now.date() - timedelta(days=30)).isoformat()
+    data = await fetch_json(f"/{start}..", {"from": "EUR", "to": "HUF"})
     try:
-        observations = [{"date": day, "rate": float(values["USD"])}
+        observations = [{"date": day, "rate": float(values["HUF"])}
                         for day, values in sorted(data["rates"].items())]
         if not observations or any(not math.isfinite(p["rate"]) or p["rate"] <= 0 for p in observations):
             raise ValueError("Invalid provider rate")
@@ -51,9 +51,12 @@ async def get_market():
         prior = [p["rate"] for p in observations if cutoff <= p["date"] < latest["date"]]
         ordered = sorted(prior)
         benchmark = ordered[min(len(ordered) - 1, math.ceil(len(ordered) * 0.75) - 1)] if ordered else None
-        return {**latest, "base": "EUR", "quote": "USD", "source": "Frankfurter / ECB",
+        return {**latest, "base": "EUR", "quote": "HUF", "source": "Frankfurter / ECB",
                 "source_url": "https://frankfurter.dev/v1/", "fetched_at": now.isoformat(),
                 "history": observations, "optimal_rate": benchmark,
+                "trend": {"first_rate": observations[0]["rate"], "latest_rate": latest["rate"],
+                          "change_30d_pct": round((latest["rate"] / observations[0]["rate"] - 1) * 100, 3),
+                          "change_5_observations_pct": round((latest["rate"] / observations[max(0, len(observations) - 6)]["rate"] - 1) * 100, 3)},
                 "average_rate": round(sum(prior) / len(prior), 6) if prior else None,
                 "cadence": "Daily reference rates, not a live trading quote"}
     except (KeyError, TypeError, ValueError) as exc:
@@ -61,14 +64,10 @@ async def get_market():
 
 
 async def get_reference_rates(base):
-    supported = await fetch_json("/currencies")
-    if base not in supported:
-        raise ValueError(f"Unsupported currency: {base}")
-    data = await fetch_json("/latest", {"from": base})
-    if not data.get("rates"):
-        raise MarketUnavailable("Reference rates are unavailable.")
-    data["rates"][base] = 1.0
-    return data
+    if base != "EUR":
+        raise ValueError("Only EUR/HUF is supported.")
+    quote = await get_market()
+    return {"base": "EUR", "date": quote["date"], "rates": {"HUF": quote["rate"]}}
 
 
 async def reference_conversion(amount, source, target):
@@ -76,9 +75,9 @@ async def reference_conversion(amount, source, target):
     if not amount.is_finite() or not 0 < amount <= 1000000 or amount.as_tuple().exponent < -2:
         raise ValueError("Amount must be positive, at most 1,000,000, with at most two decimal places.")
     source, target = source.upper(), target.upper()
+    if (source, target) != ("EUR", "HUF"):
+        raise ValueError("Only EUR/HUF is supported.")
     data = await get_reference_rates(source)
-    if target not in data["rates"]:
-        raise ValueError(f"Unsupported currency: {target}")
     rate = data["rates"][target]
     return {"from_currency": source, "to_currency": target, "amount": float(amount),
             "rate": rate, "converted_amount": float(money(amount * Decimal(str(rate)))),

@@ -121,33 +121,9 @@ def get_optimal_window(transactions: list) -> dict:
 
 
 def should_execute_now(current_rate: float, transactions: list) -> dict:
-    # Hard thresholds
-    if current_rate >= 1.12:
-        decision = "execute"
-        reason = f"Rate {current_rate} is above the hard upper threshold of 1.12"
-        avg_rate = _last_n_avg(transactions, 30)
-        return _decision_payload(decision, reason, current_rate, avg_rate)
-
-    if current_rate <= 1.07:
-        decision = "hold"
-        reason = f"Rate {current_rate} is below the hard lower threshold of 1.07"
-        avg_rate = _last_n_avg(transactions, 30)
-        return _decision_payload(decision, reason, current_rate, avg_rate)
-
+    # Hard limits and AI execution authority are enforced by autopilot, not sample analysis.
     avg_rate = _last_n_avg(transactions, 30)
-    threshold = round(avg_rate * 1.005, 6)
-    rate_diff_pct = round((current_rate - avg_rate) / avg_rate * 100, 2)
-
-    if current_rate >= threshold:
-        decision = "execute"
-        sign = "+" if rate_diff_pct >= 0 else ""
-        reason = f"Rate is {sign}{rate_diff_pct}% above your 30-day average"
-    else:
-        decision = "hold"
-        sign = "+" if rate_diff_pct >= 0 else ""
-        reason = f"Rate is {sign}{rate_diff_pct}% vs your 30-day average — below the execute threshold"
-
-    return _decision_payload(decision, reason, current_rate, avg_rate, threshold)
+    return _decision_payload("hold", "Sample-history analysis never authorizes an exchange. A validated AI timing decision is required.", current_rate, avg_rate)
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +141,7 @@ def _to_df(transactions: list) -> pd.DataFrame:
 
 def _last_n_avg(transactions: list, days: int) -> float:
     if not transactions:
-        return 1.08
+        return 0.0
     df = _to_df(transactions).sort_values("date")
     cutoff = df["date"].max() - pd.Timedelta(days=days)
     recent = df[df["date"] >= cutoff]
@@ -183,7 +159,7 @@ def _decision_payload(
 ) -> dict:
     if threshold is None:
         threshold = round(avg_rate * 1.005, 6)
-    rate_diff_pct = round((current_rate - avg_rate) / avg_rate * 100, 2)
+    rate_diff_pct = round((current_rate - avg_rate) / avg_rate * 100, 2) if avg_rate else 0.0
     return {
         "decision": decision,
         "reason": reason,

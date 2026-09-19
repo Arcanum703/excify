@@ -32,8 +32,8 @@ class BlobContractTests(unittest.IsolatedAsyncioTestCase):
     async def test_pagination_includes_every_account(self):
         def handler(request):
             if request.url.params.get("cursor") == "next":
-                return httpx.Response(200, json={"blobs": [{"pathname": "excify-v1/development/account-b.json"}], "hasMore": False})
-            return httpx.Response(200, json={"blobs": [{"pathname": "excify-v1/development/account-a.json"}], "hasMore": True, "cursor": "next"})
+                return httpx.Response(200, json={"blobs": [{"pathname": "excify-eur-huf-ai-v2/development/account-b.json"}], "hasMore": False})
+            return httpx.Response(200, json={"blobs": [{"pathname": "excify-eur-huf-ai-v2/development/account-a.json"}], "hasMore": True, "cursor": "next"})
         client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         with patch("plan_store.httpx.AsyncClient", return_value=client):
             self.assertEqual(await self.store.keys(), ["account-a", "account-b"])

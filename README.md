@@ -1,51 +1,70 @@
-# Excify Autopilot
+# Excify — AI-directed EUR/HUF exchange timing
 
-**Set a target. Protect your minimum. Let the agent check rates while you are away.**
+**AI-directed timing, rule-enforced safety limits.**
 
 Live demo: https://excify-livid.vercel.app
 
-Excify is an independent EUR → USD exchange-planning prototype, not affiliated with Wise. It uses real, dated ECB reference rates and performs **simulated exchanges only**. It does not hold funds, contact a bank, or move real money.
+Excify gives Devin the execute/wait decision for an authorized **simulated EUR → HUF exchange**. Real European Central Bank observations, the recent trend, and the user's goal are its inputs. Code—not the model—enforces the protected minimum, deadline, pause state, and rate freshness before applying the result.
 
-## One complete flow
+No bank is connected. No money moves. Reference rates do not include a bank's fees, spreads, or settlement terms. Excify is not affiliated with Wise and does not guarantee a best future rate.
 
-1. Enter an amount and review the reference-rate conversion.
-2. Confirm a simulated exchange to receive a persistent receipt, or activate an autopilot plan.
-3. Set your favorable target, protected minimum, deadline, and strategy.
-4. Pause/resume a plan, inspect its decision log, and return later to its saved result.
-5. Test the same rules against seven real historical observations using the clearly labeled replay.
+## Demo flow
 
-The dashboard retains the original vanilla HTML/CSS/JavaScript and Python/FastAPI stack. No frontend framework or paid FX API is required.
+1. Enter EUR and inspect the real HUF quote and its publication date.
+2. Set an amount, favorable target, protected minimum, deadline, and strategy; activate AI autopilot.
+3. Watch a pending Devin analysis become an **execute** or **wait** decision. The log records its rationale, session identifier, market evidence, and the backend outcome.
+4. Click a decision marker on the 30-day chart. AI execution, AI waiting, and a safety veto are distinguished.
+5. Pause the plan, refresh, or close the browser. Production decisions are delivered to the server independently of the browser.
 
-## What is real, and what is simulated?
+Manual simulations remain available behind explicit confirmation and are labeled **User-confirmed**, not AI-directed.
 
-| Component | Behavior |
-| --- | --- |
-| Rates and history | Real Frankfurter v1 / European Central Bank daily reference observations; source and date displayed |
-| Market timing | Deterministic, auditable rules, not a prediction of the best future price |
-| Background checks | Vercel Cron, daily between 17:00 and 18:00 UTC in production; works with the browser closed |
-| Plan state and receipts | Private Vercel Blob with conditional writes; SQLite for local development without Blob credentials |
-| Execution | Simulation at a reference rate; fees, spreads, settlement, and bank transfers are not modeled |
-| Historical replay | Uses actual past observations and only earlier observations for its benchmark; does not change saved plans |
-| AI | Execution is rule-based. Optional legacy Cerebras chat is local-only. Devin analysis is not connected yet. No LLM is required or claimed for these decisions. |
-| Bundled transaction history | Sample data from the original prototype; not used as the current market benchmark |
+## Where AI has authority
 
-## Execution rules, in priority order
+- In **AI optimal timing**, Devin can execute below the favorable target or wait above it. Historical averages and the approaching deadline are reasoning inputs, not automatic execute rules.
+- In **AI target-only timing**, reaching the target merely makes execution eligible. Devin still chooses execute or wait; the target acts as an additional user constraint.
+- The model returns a schema-validated, final decision with a context identifier, EUR/HUF pair, observed rate/date, action, and concise rationale.
+- Every applied execute/wait response is logged, including proposals rejected by safety checks.
+- No valid AI response means **hold**. There is no rule-only execution fallback or fabricated model rationale.
 
-1. **Finished plans stay finished.** Repeated jobs cannot execute a completed plan again.
-2. **Deadline reached:** expire without a late exchange. Resuming does not extend the deadline.
-3. **Paused:** no execution.
-4. **Unavailable, invalid, or stale rate:** hold safely. No fabricated fallback rates.
-5. **Below the protected minimum:** never exchange, regardless of deadline or strategy.
-6. **At or above the favorable target:** execute a simulation.
-7. **Optimal mode, final 36 hours:** accept an eligible rate at or above the minimum.
-8. **Optimal mode, otherwise:** execute when the rate meets the upper-quartile benchmark of prior observations from the recent 30 calendar days.
-9. Otherwise, hold. Target-only mode never relaxes its target.
+### Hard constraints
 
-Rates must have a valid positive value, a provider date no more than four calendar days old (allowing weekends/holidays), and a server snapshot no more than 30 minutes old. Longer holiday gaps fail closed rather than inventing a price. Reference data is cached for ten minutes. Free daily scheduling requires a deadline between 26 hours and 90 days ahead; the dashboard uses the end of the selected UTC date. This is not exact-minute scheduling or intraday market monitoring.
+The backend re-reads the saved plan and the latest verified market observation when the AI response arrives:
 
-## Run locally
+1. A completed/expired plan cannot execute again.
+2. At or after the deadline, expire without a late exchange.
+3. A paused plan cannot execute; pause/resume invalidates older authorizations.
+4. Require a fresh, positive, verified EUR/HUF observation.
+5. Never execute below the protected minimum, even if Devin says execute or the deadline is close.
+6. Enforce target-only eligibility when selected.
+7. Reject responses with mismatched context, changed rate/date, or an expired analysis window.
+8. Store the outcome and receipt in one conditional write, so retries cannot duplicate execution.
 
-Python 3.13 recommended; use an isolated virtual environment.
+Provider dates may be up to four calendar days old to allow weekends/holidays; older observations fail closed. Market snapshots and AI attempts expire after 30 minutes. A changed observation requires new analysis.
+
+## Real rate chart
+
+Frankfurter v1 supplies ECB **EUR/HUF** reference observations. Support was verified against the actual latest and historical endpoints. All conversion endpoints are restricted to EUR → HUF.
+
+- The chart uses the last 30 calendar days of real published observations, with a calendar-date axis.
+- Saved decisions are plotted at their **rate publication date and actual rate**, not invented intraday prices.
+- Marker details show when the decision was applied, its rationale, and the backend result. A selector makes overlapping decisions accessible.
+- Data refreshes every ten minutes while open; pending decisions refresh separately. ECB publishes daily on working days, not tick-by-tick.
+- Missing data is an explicit unavailable state, never a hardcoded fallback.
+- Historical safety inspection shows eligibility against real observations; it does **not** fabricate past AI decisions or claim to be an AI backtest.
+
+## Durable async operation
+
+Vercel Hobby Cron requests checks daily between **17:00 and 18:00 UTC**. Activation and resume also request analysis. The daily schedule requires a deadline 26 hours to 90 days ahead; dates in the form mean end-of-day UTC. Exact-minute execution is not guaranteed.
+
+Each check reserves a persistent job before creating a Devin session. Devin receives only numeric/enum goal data and verified market history—not arbitrary user prompts or repository tasks. Organization knowledge/secrets are disabled. A session-specific, sensitive callback token authorizes only that one decision.
+
+Devin posts its final decision to a scoped callback; the backend independently validates and applies it. This works with the browser closed. The normal check endpoint and daily worker can also reconcile saved session output if delivery fails. An expired/failed session holds safely and is visible in the trail.
+
+A conditional global budget allows **20 sessions/day by default**, bounded to one ACU each. `DEVIN_MAX_SESSIONS_PER_DAY` can change the daily cap, up to 100. This limits accidental public-demo usage of the supplied Devin account; it does not assert the account's usage is free.
+
+## Local setup
+
+Keep the existing Python/FastAPI and vanilla HTML/CSS/JavaScript stack. No new SDK or chart package is required. Python 3.13 recommended; deployment is also built on Vercel's supported Python runtime.
 
 ```sh
 python -m venv .venv
@@ -65,55 +84,57 @@ macOS/Linux:
 .venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-Open http://127.0.0.1:8000. No keys are needed locally. Without a Blob token, state lives in ignored `.excify/plans.sqlite3`; there is no automatic local scheduler. Use **Check now** or invoke the authenticated job endpoint. `.env` and `.env.local` are loaded if present and must never be committed.
+Open http://127.0.0.1:8000. Put secrets in the ignored `.env.local` file; never in source or chat.
 
-## Verify
+| Variable | Purpose |
+| --- | --- |
+| `DEVIN_API_KEY` | Server-only Devin key. Personal/service legacy keys use v1; current service-user keys use v3. |
+| `DEVIN_ORG_ID` | Required for v3. Legacy keys already carry organization scope. |
+| `BLOB_READ_WRITE_TOKEN`, `BLOB_STORE_ID` | Private persistent Vercel Blob storage; absent locally, use SQLite. |
+| `CRON_SECRET` | Authenticates Vercel's scheduled worker. |
+| `EXCIFY_PUBLIC_URL` | Trusted HTTPS production origin for scoped AI callbacks. |
+| `DEVIN_MAX_SESSIONS_PER_DAY` | Bounded provider usage; defaults to 20. |
+
+Local/preview environments do not use the production callback. Use **Check AI result**, or leave the UI open to reconcile pending results. Without a Devin key, quotes and explicit manual simulations work but autonomous timing holds. No local scheduler is implied.
+
+## Test
 
 ```sh
-python -m unittest test_autopilot test_api test_store test_market -v
+python -m unittest test_ai_timing test_autopilot test_api test_store test_market test_devin_timing -v
+node --test test_chart.cjs
 node --check static/app.js
 ```
 
-Tests cover the protected floor, exact threshold boundaries, deadline behavior, pause/resume, stale data, input validation, isolated sessions, persistent storage, duplicate execution, a worker request without browser cookies, and the Blob HTTP contract (including strong ETags and pagination). Unit/API tests use temporary SQLite and mocked rates: no provider keys or cloud writes.
+Automated tests use temporary SQLite and mocked provider responses; they do not spend API credits. Coverage includes AI wait above target, AI execute below target, an execute proposal blocked by the minimum, deadline/pause enforcement, callback authentication and replay, response evidence matching, budget limits, persistence, private sessions, atomic writes, real-shaped HUF data, chart marker alignment, and escaping model text.
 
-The original `test_pattern.py` is an exploratory sample-history script, not the regression test suite.
+Live verification separately creates bounded real Devin sessions using actual ECB observations. The original `test_pattern.py` remains an exploratory sample-data script, not an execution engine. Its sample transactions use real dated HUF observations with explicitly simulated amounts/results.
 
-## Vercel deployment
+## Deploy
 
-1. Create a Vercel FastAPI project and connect a **private** Blob store.
-2. Make `BLOB_READ_WRITE_TOKEN` and `BLOB_STORE_ID` available to the appropriate environments. The token is server-only.
-3. Generate a strong random `CRON_SECRET` and add it to Production. Never put it in the repository or browser code.
-4. Deploy this directory. `vercel.json` schedules `GET /api/cron` daily; Vercel supplies `Authorization: Bearer <CRON_SECRET>`.
-5. Verify `/health`, create a plan, trigger the deployed cron, and inspect the server heartbeat and persisted last-check time. A page refresh or an open browser is not the scheduler.
+1. Use the existing Vercel FastAPI project and private Blob store.
+2. Configure the variables above as server-side Vercel environment variables. Do not overwrite `.env.local` when refreshing Vercel environment files.
+3. Deploy the committed source. `vercel.json` configures the authenticated daily cron.
+4. Verify the public page, quote source/date, a real AI callback with no browser polling, saved reasoning and chart markers, and the worker heartbeat.
 
-Hobby Blob is free within its limits and blocks access rather than charging overages. Monitor usage: this prototype limits sessions to ten saved plans and refuses new sessions at its demo capacity. It is not a production banking ledger. Deployment protection must allow the intended audience to open the production URL; do not expose store credentials to bypass it.
+Vercel Hobby storage has usage limits; exceeding them pauses access rather than authorizing unsafe execution. No paid service or upgrade is required for this hosting setup. The supplied Devin API uses the user's existing account.
 
-The old Render configuration remains as an alternative HTTP host, but does not configure an unattended worker by itself. Do not claim background operation on Render without arranging a scheduler.
+## Persistence, migration, and security
 
-## API and architecture
+Private plans are isolated by opaque HttpOnly, SameSite browser-session cookies (Secure on Vercel); storage uses only their hashes. Keep cookies to revisit a plan. Losing cookies does not cancel it: pause plans first.
 
-| Route | Purpose |
-| --- | --- |
-| `GET /api/market` | Dated quote, historical observations, benchmark and freshness |
-| `GET /api/state` | Private browser-session plans and global scheduler heartbeat |
-| `POST /api/plans` | Authorize a saved autopilot plan and check immediately |
-| `PATCH /api/plans/{id}` | Pause/resume only a plan in the current session |
-| `POST /api/plans/{id}/check` | Manual check, limited to once per five minutes |
-| `POST /api/exchange` | Explicit simulated exchange with an idempotency key |
-| `POST /api/replay` | Historical evaluation, never saved as a live plan |
-| `GET /api/cron` | Secret-protected server job, independent of browser cookies |
-| `POST /convert` | Validated reference conversion for provider-supported currencies |
-| `POST /deposit` | Legacy quote-only endpoint; does not claim execution |
-| `GET /history` | Explicitly labeled bundled sample history |
-| `GET /health` | Health check |
+The EUR/HUF release uses a **new currency-versioned storage namespace** and local database. Prior-pair data is preserved in its old namespace, excluded from the new UI and worker, and never relabeled or numerically reinterpreted. Create new EUR/HUF plans. Development, preview, and production are isolated from each other.
 
-`autopilot.py` is the pure decision engine. `market.py` owns verified provider data. `plan_store.py` implements optimistic concurrency. `autopilot_api.py` combines session isolation, confirmations, state transitions, replay, and the worker. `main.py` serves the app and legacy endpoints. `static/app.js` renders server results rather than overriding decisions.
+Callback tokens are scoped, hashed at rest, and excluded from API responses. Provider keys never reach the browser. Pause/resume increments plan authorization versions; an old response cannot execute a newly resumed plan. Provider errors are sanitized. The demo is not a production banking ledger or financial-advice system.
 
-Anonymous demo sessions use opaque, HttpOnly, SameSite cookies (Secure in deployment); the store uses only their hashes. Losing cookies loses access to that session, but does not cancel server-side plans. Pause plans before clearing cookies. Concurrent pause/job writes are retried against the latest stored state. State changes and receipts are stored in the same conditional write. Development, preview, and production use separate storage namespaces so a production job cannot execute a development plan.
+## Architecture
 
-## Demo script
+- `autopilot.py`: decision schema, hard safety constraints, receipts, and audit events.
+- `devin_timing.py`: actual Devin session creation and structured output retrieval.
+- `timing_service.py`: persistent jobs, scoped delivery, revalidation, idempotency, and usage budget.
+- `market.py`: verified EUR/HUF observations, recent history, and trend inputs.
+- `plan_store.py`: local SQLite / private Blob with strong-ETag conditional writes.
+- `autopilot_api.py`: session-isolated controls, worker, callbacks, and safety inspection.
+- `static/rate-chart.js`: testable real-data chart and decision-marker geometry.
+- `static/app.js`: renders AI proposals and server outcomes without overriding either.
 
-- Convert EUR 1,200, review the date/source, confirm a simulation, and refresh to show its saved receipt.
-- Create a **Target only** plan with a target above the current quote and a minimum below it. Show that it is waiting; pause and resume it.
-- Switch to **Optimal**, choose sensible bounds around the visible historical range, and replay the recent observations. Explain each decision and the hard minimum.
-- Show the server schedule and last successful worker run. Clearly separate real reference data, historical replay, and simulated execution.
+Key routes: `/api/market`, `/api/state`, `/api/plans`, `/api/plans/{id}/check`, `/api/ai-decisions/{account}/{plan}/{attempt}`, `/api/cron`, `/api/exchange`, `/api/replay`, `/convert`, `/health`. Optional legacy local chat/voice endpoints are not the timing authority.

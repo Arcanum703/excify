@@ -15,8 +15,8 @@ MODEL = "gpt-oss-120b"
 MAX_TOOL_ITERATIONS = 6
 
 SYSTEM_PROMPT = """You are a helpful currency exchange assistant. You can:
-- Convert amounts between currencies
-- Look up current exchange rates
+- Convert EUR to HUF only
+- Look up dated EUR/HUF reference rates
 - Summarise the user's transaction history
 - Answer questions about currency trends or general FX topics
 
@@ -34,8 +34,8 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "amount": {"type": "number", "description": "The amount to convert."},
-                    "from_currency": {"type": "string", "description": "ISO 4217 source currency code (e.g. USD)."},
-                    "to_currency": {"type": "string", "description": "ISO 4217 target currency code (e.g. EUR)."},
+                    "from_currency": {"type": "string", "enum": ["EUR"], "description": "Source currency: EUR."},
+                    "to_currency": {"type": "string", "enum": ["HUF"], "description": "Target currency: HUF."},
                 },
                 "required": ["amount", "from_currency", "to_currency"],
             },
@@ -49,7 +49,7 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "base_currency": {"type": "string", "description": "ISO 4217 base currency code (e.g. USD)."},
+                    "base_currency": {"type": "string", "enum": ["EUR"], "description": "EUR base for the only supported EUR/HUF pair."},
                 },
                 "required": ["base_currency"],
             },
@@ -100,7 +100,7 @@ async def generate_reasoning(
     rate_high: float = 0.0,
 ) -> str:
     return (
-        f"Reference rate: {current_rate} USD per EUR. Historical comparison: {avg_rate}. "
+        f"Reference rate: {current_rate} HUF per EUR. Historical comparison: {avg_rate}. "
         f"Rule-based assessment: {decision}. This is not a forecast or a real exchange. "
         "Autopilot execution is controlled by the explicitly authorized plan and its protected minimum."
     )
