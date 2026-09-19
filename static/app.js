@@ -26,6 +26,20 @@ function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach(button => { const selected = button.id === `${name}Tab`; button.classList.toggle('active', selected); button.setAttribute('aria-selected', String(selected)); });
 }
 function planThisAmount() { $('predAmount').value = $('amountInput').value; switchTab('predictify'); $('predAmount').focus(); }
+async function fillTargetDemo() {
+  await busy('demoBtn', async () => {
+    await fetchLiveRate();
+    if (!market?.usable) throw new Error('A fresh real quote is required for the demo.');
+    $('predAmount').value = '100';
+    $('targetRate').value = market.rate.toFixed(4);
+    $('minimumRate').value = Math.max(0.01, market.rate - 1).toFixed(4);
+    $('predDeadline').value = new Date(Date.now() + 2 * 86400000).toISOString().slice(0,10);
+    document.querySelector('input[name="strategy"][value="optimal"]').checked = true;
+    $('authorizePlan').checked = false;
+    switchTab('predictify');
+    toast(`Real quote ${rateFmt(market.rate)} HUF/EUR (${market.date}). Check the authorization box and activate to see the target trigger execute.`);
+  });
+}
 
 /* ── LIVE RATE ── */
 async function fetchLiveRate() {
@@ -121,7 +135,7 @@ function renderPlans(data) {
       <details ${index === 0 && lastAI ? 'open' : ''}><summary>Decision trail (${plan.events.length})</summary><ol class="timeline">${renderEvents(plan.events)}</ol></details></article>`;
   }).join('') : '<div class="history-empty"><strong>No EUR/HUF plans yet.</strong><p class="muted">Activate autopilot to request a real AI timing decision.</p></div>';
   const completed = plans.filter(plan => plan.receipt);
-  $('historyList').innerHTML = completed.length ? completed.slice(0,3).map(plan => `<div class="history-item"><div><strong>EUR ${fmt(plan.amount)}</strong><p class="muted">${esc(when(plan.receipt.executed_at))}</p></div><div style="text-align:right"><strong class="positive">HUF ${fmt(plan.receipt.received_huf)}</strong><p class="muted">${plan.receipt.authority === 'User-confirmed simulation' ? 'User-confirmed' : 'AI-directed'} simulation</p></div></div>`).join('') : '<div class="history-empty">Your first simulated exchange starts here.</div>';
+  $('historyList').innerHTML = completed.length ? completed.slice(0,3).map(plan => `<div class="history-item"><div><strong>EUR ${fmt(plan.amount)}</strong><p class="muted">${esc(when(plan.receipt.executed_at))}</p></div><div style="text-align:right"><strong class="positive">HUF ${fmt(plan.receipt.received_huf)}</strong><p class="muted">${plan.receipt.authority === 'User-confirmed simulation' ? 'User-confirmed' : plan.receipt.authority === 'Target-triggered simulation' ? 'Target-triggered' : 'AI-directed'} simulation</p></div></div>`).join('') : '<div class="history-empty">Your first simulated exchange starts here.</div>';
   if (market) drawChart(market.history);
 }
 async function refreshPlans() {
@@ -129,7 +143,7 @@ async function refreshPlans() {
     const state = await api('/api/state');
     sessionReady = true;
     renderPlans(state);
-    $('aiStatus').textContent = state.ai_configured ? 'Devin configured · AI has execute/wait authority within your safety limits.' : 'Devin is not configured. Autonomous plans hold safely; no rule-based execution fallback.';
+    $('aiStatus').textContent = state.ai_configured ? 'Target triggers execute automatically. Devin decides only in the final 36-hour middle zone, above your protected floor.' : 'Target triggers still work. Near-deadline middle-zone plans hold until Devin is available; no silent AI fallback.';
     $('schedulerStatus').textContent = state.background_enabled ? 'Vercel requests AI checks daily between 17:00 and 18:00 UTC. Devin delivers decisions back to the server, even with your browser closed. Activation and resume request a check too.' : 'Local/preview mode: no background scheduler or production callback. Use Check AI result to collect a pending decision.';
     const heartbeat = state.heartbeat;
     const old = heartbeat && Date.now() - new Date(heartbeat.checked_at).getTime() > 27 * 3600000;

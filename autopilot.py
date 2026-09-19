@@ -60,7 +60,7 @@ def new_plan(request, now=None):
     plan.update(id=request.request_id or uuid.uuid4().hex, amount=money(request.amount), pair=PAIR,
                 status="active", created_at=now.isoformat(), last_checked_at=None, receipt=None,
                 events=[], generation=0, pending_ai=None, reason="Waiting for Devin's first timing decision.")
-    add_event(plan, "activated", AUTHORITY + ". Simulated exchanges only. No rule automatically authorizes execution.", now)
+    add_event(plan, "activated", "Target reached: instant simulated execution. Below minimum: always hold. In between: monitor until the final 36 hours, then ask AI. Hard safety limits always apply.", now)
     return plan
 
 
@@ -110,7 +110,13 @@ def safety_block(plan, quote, now):
     return None
 
 
-def apply_check(original, quote, now=None, *, decision=None, session_id=None, error=None):
+def requires_ai(plan, quote, now):
+    return (plan["status"] == "active" and safety_block(plan, quote, now) is None
+            and Decimal(str(quote["rate"])) < Decimal(plan["target_rate"])
+            and datetime.fromisoformat(plan["deadline"]) - now <= timedelta(hours=36))
+
+
+def apply_check(original, quote, now=None, *, decision=None, session_id=None, error=None, allow_target=True):
     now = now or utcnow()
     plan = copy.deepcopy(original)
     if plan["status"] in ("completed", "expired"):
@@ -127,29 +133,42 @@ def apply_check(original, quote, now=None, *, decision=None, session_id=None, er
         code, reason = block
         if code == "expired":
             plan["status"] = "expired"
-    elif decision is None:
-        code, reason = "ai_unavailable", error or "No valid AI decision is available. Holding; no automatic rule fallback."
-    elif not evidence_matches:
+    elif decision is not None and not evidence_matches:
         code, reason = "evidence_changed", "The market observation changed after analysis. A new AI decision is required."
+    elif allow_target and Decimal(str(quote["rate"])) >= Decimal(plan["target_rate"]):
+        code, reason = "target_execute", f"Favorable target reached: {quote['rate']} HUF/EUR meets or exceeds {plan['target_rate']}. Executed immediately by your hard target rule; no AI deliberation needed."
+    elif datetime.fromisoformat(plan["deadline"]) - now > timedelta(hours=36):
+        hours = (datetime.fromisoformat(plan["deadline"]) - now).total_seconds() / 3600
+        code, reason = "monitoring_window", f"{hours:.1f} hours remain. Rate is between your minimum and target; monitoring for a better rate. AI timing starts in the final 36 hours."
+    elif decision is None:
+        code, reason = "ai_unavailable", error or "No valid AI decision is available in the deadline-pressure window. Holding; no silent fallback."
     elif decision.action == "wait":
-        code, reason = "ai_wait", "Devin chose to wait. " + decision.reasoning
+        hours = (datetime.fromisoformat(plan["deadline"]) - now).total_seconds() / 3600
+        code, reason = "ai_wait", f"{hours:.1f} hours to deadline. Devin chose to wait. " + decision.reasoning
     else:
-        code, reason = "ai_execute", "Devin chose to execute within your safety limits. " + decision.reasoning
+        hours = (datetime.fromisoformat(plan["deadline"]) - now).total_seconds() / 3600
+        code, reason = "ai_execute", f"{hours:.1f} hours to deadline. Devin chose to execute above your protected minimum. " + decision.reasoning
+    if code in ("target_execute", "ai_execute"):
         plan["status"] = "completed"
+        if plan.get("pending_ai"):
+            job = plan["pending_ai"]
+            plan["last_ai_delivery"] = {"id": job["id"], "token_hash": job["token_hash"]}
+            plan["pending_ai"] = None
         plan["receipt"] = {
             "id": "SIM-" + plan["id"], "simulated": True, "pair": PAIR, "executed_at": now.isoformat(),
             "sent_eur": plan["amount"], "received_huf": money(Decimal(plan["amount"]) * Decimal(str(quote["rate"]))),
             "rate": str(quote["rate"]), "rate_date": quote["date"], "source": quote["source"],
-            "reason": decision.reasoning, "authority": AUTHORITY, "session_id": session_id,
+            "reason": reason, "authority": "Target-triggered simulation" if code == "target_execute" else AUTHORITY, "session_id": session_id,
             "fees": "Not modeled; reference-rate simulation only.",
         }
     add_event(plan, code, reason, now, quote.get("rate") if quote else None,
               rate_date=quote.get("date") if quote else None, pair=PAIR,
-              action="execute" if code == "ai_execute" else "hold", authority=AUTHORITY,
+              action="execute" if code in ("ai_execute", "target_execute") else "hold", authority=AUTHORITY,
+              decision_source="target_rule" if code == "target_execute" else "ai" if decision else "safety_or_time_rule",
               ai_action=decision.action if decision else None,
               ai_reasoning=decision.reasoning if decision else None,
               context_id=decision.context_id if decision else None, session_id=session_id,
-              safety_allowed=block is None and evidence_matches,
+              safety_allowed=block is None and (code == "target_execute" or evidence_matches),
               target_rate=plan["target_rate"], minimum_rate=plan["minimum_rate"], deadline=plan["deadline"])
     return plan
 

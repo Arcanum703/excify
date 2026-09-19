@@ -6,11 +6,12 @@ import re
 import secrets
 import uuid
 from datetime import datetime, timedelta
+from decimal import Decimal
 from urllib.parse import urlparse
 
 from fastapi import HTTPException
 
-from autopilot import AUTHORITY, add_event, apply_check, utcnow, valid_quote
+from autopilot import AUTHORITY, add_event, apply_check, requires_ai, safety_block, utcnow, valid_quote
 from devin_timing import AIUnavailable, configuration, evidence, session_decision, start_session
 from market import MarketUnavailable, get_market
 from plan_store import get_store, update_record
@@ -84,7 +85,7 @@ async def fail_attempt(key, plan_id, attempt_id, message):
         if not pending or pending["id"] != attempt_id:
             return plan
         now = utcnow()
-        result = apply_check(plan, pending["quote"], now, error=message)
+        result = apply_check(plan, pending["quote"], now, error=message, allow_target=False)
         result["pending_ai"] = None
         add_event(result, "ai_error", message, now, pending["quote"].get("rate"),
                   rate_date=pending["quote"].get("date"), pair="EUR/HUF", action="hold",
@@ -108,7 +109,7 @@ async def finalize_decision(key, plan_id, attempt_id, decision):
                    or now > datetime.fromisoformat(pending["expires_at"])
                    or plan.get("generation", 0) != pending["generation"])
         if invalid:
-            result = apply_check(plan, quote, now, error="AI response no longer matches the authorized plan or analysis window. Holding safely.")
+            result = apply_check(plan, quote, now, error="AI response no longer matches the authorized plan or analysis window. Holding safely.", allow_target=False)
             add_event(result, "ai_rejected", "AI response was rejected: changed plan, expired analysis, or mismatched evidence.", now,
                       quote.get("rate") if quote else None, rate_date=quote.get("date") if quote else None,
                       pair="EUR/HUF", action="hold", ai_action=decision.action, ai_reasoning=decision.reasoning,
@@ -145,7 +146,10 @@ async def check_plan(key, plan_id):
     record, plan = await read_plan(key, plan_id)
     if plan["status"] in ("completed", "expired"):
         return record
+    quote = await optional_market()
     now = utcnow()
+    if safety_block(plan, quote, now) is None and Decimal(str(quote["rate"])) >= Decimal(plan["target_rate"]):
+        return await modify_plan(key, plan_id, lambda current: apply_check(current, quote, utcnow()))
     pending = plan.get("pending_ai")
     if pending and now > datetime.fromisoformat(pending["expires_at"]):
         record = await fail_attempt(key, plan_id, pending["id"], "The AI analysis window expired. No exchange was authorized.")
@@ -166,7 +170,7 @@ async def check_plan(key, plan_id):
         return record
     quote = await optional_market()
     now = utcnow()
-    if plan["status"] == "paused" or datetime.fromisoformat(plan["deadline"]) <= now or not valid_quote(quote, now):
+    if not requires_ai(plan, quote, now):
         return await modify_plan(key, plan_id, lambda current: apply_check(current, quote, utcnow()))
     try:
         configuration()

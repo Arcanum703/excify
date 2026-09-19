@@ -4,7 +4,7 @@
 - On Windows use `.venv/Scripts/python`; on Unix use `.venv/bin/python`.
 - Regression tests: `python -m unittest test_ai_timing test_autopilot test_api test_store test_market test_devin_timing -v` and `node --test test_chart.cjs`.
 - EUR/HUF is the only supported pair. Never relabel prior-pair stored amounts; use the currency-versioned storage namespace.
-- Autonomous execution needs a schema-valid final Devin decision; there is no rule-only fallback. Callback and polling paths must recheck safety against the current plan and market.
+- At/above target, execute immediately without AI after hard safety checks. In the middle zone wait beyond 36 hours; within 36 hours require a schema-valid Devin decision. Never use an AI-failure fallback. Callback and polling paths must recheck current safety limits.
 - Live Devin tests consume the supplied account's allowance; unit/API tests must mock provider calls.
 - Never pull Vercel environment files over `.env.local`, which contains user-maintained Devin credentials.
 - JavaScript syntax check: `node --check static/app.js`.

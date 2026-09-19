@@ -43,7 +43,7 @@ class ApiTests(unittest.TestCase):
         self.client.get("/api/state")
         self.headers = {"X-Excify-Intent": "plan"}
         self.payload = {"amount": 1200, "target_rate": 380, "minimum_rate": 350,
-                        "deadline": (self.now + timedelta(days=5)).isoformat(), "strategy": "optimal"}
+                        "deadline": (self.now + timedelta(hours=30)).isoformat(), "strategy": "optimal"}
 
     async def start_session(self, context, callback=None, token=None):
         session = "devin-" + context["context_id"]
@@ -85,15 +85,34 @@ class ApiTests(unittest.TestCase):
         self.assertIsNotNone(plan["pending_ai"])
         self.assertEqual(len(self.sessions), 1)
 
-    def test_creation_is_pending_not_rule_execution(self):
-        self.payload["target_rate"] = 360
-        self.payload["minimum_rate"] = 340
+    def test_target_creation_executes_without_ai_or_credentials(self):
+        self.payload["target_rate"] = 364.28
+        self.payload["minimum_rate"] = 363
+        with patch.dict(os.environ, {"DEVIN_API_KEY": ""}):
+            plan = self.create()
+        self.assertEqual(plan["status"], "completed")
+        self.assertEqual(plan["receipt"]["received_huf"], "437136.00")
+        self.assertEqual(plan["events"][-1]["code"], "target_execute")
+        self.assertEqual(len(self.sessions), 0)
+        self.assertIsNone(plan["pending_ai"])
+
+    def test_early_middle_zone_does_not_call_ai(self):
+        self.payload["deadline"] = (self.now + timedelta(days=3)).isoformat()
         plan = self.create()
-        self.assertEqual(plan["status"], "active")
-        self.assertIsNone(plan["receipt"])
-        self.assertTrue(plan["pending_ai"]["session_id"])
-        self.assertNotIn("token_hash", json.dumps(plan))
-        self.assertNotIn("context", plan["pending_ai"])
+        self.assertEqual(plan["events"][-1]["code"], "monitoring_window")
+        self.assertEqual(len(self.sessions), 0)
+
+    def test_scheduled_target_check_bypasses_pending_ai_and_cooldown(self):
+        self.create()
+        self.quote["rate"] = 380
+        with patch.dict(os.environ, {"CRON_SECRET": "test-only-secret"}):
+            response = self.client.get("/api/cron", headers={"Authorization":"Bearer test-only-secret"})
+        self.assertEqual(response.status_code, 200, response.text)
+        plan = self.client.get("/api/state").json()["plans"][0]
+        self.assertEqual(plan["status"], "completed")
+        self.assertEqual(plan["events"][-1]["code"], "target_execute")
+        self.assertEqual(len(self.sessions), 1)
+        self.assertIsNone(plan["pending_ai"])
 
     def test_ai_wait_is_logged_and_does_not_execute(self):
         plan = self.finish(self.create())
@@ -139,8 +158,8 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(sum(e["code"] == "ai_execute" for e in plan["events"]), 1)
 
     def test_ai_execute_below_minimum_is_vetoed_end_to_end(self):
-        self.payload["minimum_rate"] = 370
         plan = self.create()
+        self.quote["rate"] = 349
         self.ai_action = "execute"
         plan = self.finish(plan)
         self.assertEqual(plan["status"], "active")

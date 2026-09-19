@@ -9,7 +9,7 @@ class AITimingTests(unittest.TestCase):
     def setUp(self):
         self.now = utcnow()
         self.plan = new_plan(PlanInput(amount=1200, target_rate=380, minimum_rate=350,
-            strategy="optimal", deadline=self.now + timedelta(days=5)), self.now)
+            strategy="optimal", deadline=self.now + timedelta(hours=30)), self.now)
         self.quote = {"base": "EUR", "quote": "HUF", "rate": 364.28,
                       "date": str(self.now.date()), "fetched_at": self.now.isoformat(),
                       "source": "Frankfurter / ECB", "average_rate": 370.0}
@@ -27,13 +27,12 @@ class AITimingTests(unittest.TestCase):
         self.assertEqual(result["receipt"]["received_huf"], "437136.00")
         self.assertEqual(result["events"][-1]["ai_action"], "execute")
 
-    def test_ai_can_wait_even_above_target(self):
+    def test_target_trigger_cannot_be_delayed_by_ai_wait(self):
         quote = self.quote | {"rate": 390}
         decision = self.decision.model_copy(update={"action": "wait", "rate": 390})
         result = self.check(decision=decision, quote=quote)
-        self.assertEqual(result["status"], "active")
-        self.assertIsNone(result["receipt"])
-        self.assertEqual(result["events"][-1]["code"], "ai_wait")
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["events"][-1]["code"], "target_execute")
 
     def test_ai_cannot_override_minimum(self):
         plan = self.plan | {"minimum_rate": "370"}
@@ -71,8 +70,7 @@ class AITimingTests(unittest.TestCase):
         self.assertIsNone(result["receipt"])
 
     def test_missing_ai_never_falls_back_to_old_rules(self):
-        quote = self.quote | {"rate": 400}
-        result = apply_check(self.plan, quote, self.now)
+        result = apply_check(self.plan, self.quote, self.now)
         self.assertEqual(result["status"], "active")
         self.assertEqual(result["events"][-1]["code"], "ai_unavailable")
         self.assertIsNone(result["receipt"])

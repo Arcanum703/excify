@@ -10,7 +10,7 @@ class AutopilotTests(unittest.TestCase):
     def setUp(self):
         self.now = datetime(2026, 9, 19, 17, tzinfo=timezone.utc)
         self.request = PlanInput(amount=1200, target_rate=380, minimum_rate=350,
-                                 strategy="optimal", deadline=self.now + timedelta(days=5))
+                                 strategy="optimal", deadline=self.now + timedelta(hours=30))
         self.plan = new_plan(self.request, self.now)
         self.quote = {"base": "EUR", "quote": "HUF", "rate": 364.28, "date": "2026-09-18",
                       "source": "Frankfurter / ECB", "fetched_at": self.now.isoformat()}

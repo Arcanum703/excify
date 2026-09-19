@@ -20,11 +20,15 @@ Manual simulations remain available behind explicit confirmation and are labeled
 
 ## Where AI has authority
 
-- In **AI optimal timing**, Devin can execute below the favorable target or wait above it. Historical averages and the approaching deadline are reasoning inputs, not automatic execute rules.
-- In **AI target-only timing**, reaching the target merely makes execution eligible. Devin still chooses execute or wait; the target acts as an additional user constraint.
+- **At or above target:** execute immediately on a check, including activation. No AI deliberation or API key is required for this explicit hard trigger; all safety checks still apply.
+- **Below the protected minimum:** always hold, without exception.
+- **Middle zone, more than 36 hours remaining:** monitor and wait without requesting AI.
+- **Middle zone, 36 hours or less remaining:** in optimal mode, Devin weighs real trend and deadline pressure and may execute above the minimum. Missing/invalid AI means hold, never a silent fallback.
+- **Strict target-only mode** remains an optional stricter setting: instant execution at target, no below-target execution.
+- Use **Fill instant-execute demo using real rate** on the form, authorize, then activate. The button uses the latest real ECB rate as the target, a floor one HUF lower, EUR 100, and a future deadline.
 - The model returns a schema-validated, final decision with a context identifier, EUR/HUF pair, observed rate/date, action, and concise rationale.
 - Every applied execute/wait response is logged, including proposals rejected by safety checks.
-- No valid AI response means **hold**. There is no rule-only execution fallback or fabricated model rationale.
+- In the near-deadline middle zone, no valid AI response means **hold**. Target execution is an explicit authorized trigger, not an AI-failure fallback; it is logged separately.
 
 ### Hard constraints
 

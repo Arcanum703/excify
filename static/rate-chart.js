@@ -15,7 +15,7 @@
       for (const event of plan.events || []) {
         const point = byDate.get(event.rate_date);
         if (event.authority !== authority || !['hold','execute'].includes(event.action) || event.pair !== 'EUR/HUF' || !point || !Number.isFinite(Number(event.rate)) || Math.abs(Number(event.rate) - point.rate) > 0.000001) continue;
-        const label = event.action === 'execute' ? 'AI execute' : event.ai_action === 'execute' ? 'Safety veto' : event.ai_action === 'wait' ? 'AI wait' : 'Safety hold';
+        const label = event.code === 'target_execute' ? 'Target execute' : event.action === 'execute' ? 'AI execute' : event.ai_action === 'execute' ? 'Safety veto' : event.ai_action === 'wait' ? 'AI wait' : 'Safety hold';
         const color = event.action === 'execute' ? '#397028' : event.ai_action === 'execute' ? '#b42318' : '#a56512';
         const key = `${plan.id}:${event.context_id || `${event.at}:${event.rate_date}:${event.action}`}`;
         unique.set(key, {...event, x:point.x, y:point.y, label, color, planId:plan.id, amount:plan.amount,
