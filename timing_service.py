@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 from fastapi import HTTPException
 
 from autopilot import AUTHORITY, add_event, apply_check, requires_ai, safety_block, utcnow, valid_quote
-from devin_timing import AIUnavailable, configuration, evidence, session_decision, start_session
+from devin_timing import AIRetryableError, AIUnavailable, configuration, evidence, session_decision, start_session
 from market import MarketUnavailable, get_market
 from plan_store import get_store, update_record
 
@@ -51,7 +51,7 @@ def public_record(record):
         plan.pop("last_ai_delivery", None)
         pending = plan.get("pending_ai")
         if pending:
-            plan["pending_ai"] = {key: pending.get(key) for key in ("id", "created_at", "expires_at", "session_id")}
+            plan["pending_ai"] = {key: pending.get(key) for key in ("id", "created_at", "expires_at", "session_id", "retry_at")}
     return result
 
 
@@ -93,6 +93,35 @@ async def fail_attempt(key, plan_id, attempt_id, message):
                   session_id=pending.get("session_id"))
         return result
     return await modify_plan(key, plan_id, fail)
+
+
+async def record_poll_retry(key, plan_id, attempt_id, message=None):
+    def update(plan):
+        pending = plan.get("pending_ai")
+        if not pending or pending["id"] != attempt_id:
+            return plan
+        result = copy.deepcopy(plan)
+        job = result["pending_ai"]
+        now = utcnow()
+        if message:
+            job["poll_failures"] = job.get("poll_failures", 0) + 1
+            delay = min(30 * 2 ** min(job["poll_failures"] - 1, 4), 300)
+            job["retry_at"] = min(now + timedelta(seconds=delay), datetime.fromisoformat(job["expires_at"])).isoformat()
+            text = message + " The existing analysis and authenticated callback remain active; polling will retry."
+            code = "ai_retry"
+        else:
+            job.pop("poll_failures", None)
+            job.pop("retry_at", None)
+            text, code = "Connection restored. Devin is still analyzing; no timing decision yet.", "ai_poll_recovered"
+        add_event(result, code, text, now, authority=AUTHORITY, context_id=attempt_id,
+                  session_id=job.get("session_id"), retry_at=job.get("retry_at"))
+        return result
+    return await modify_plan(key, plan_id, update)
+
+
+def in_cooldown(plan, now):
+    last_requested = plan.get("last_requested_at")
+    return bool(last_requested and now - datetime.fromisoformat(last_requested) < timedelta(minutes=5))
 
 
 async def finalize_decision(key, plan_id, attempt_id, decision):
@@ -158,15 +187,21 @@ async def check_plan(key, plan_id):
         if plan["status"] in ("completed", "expired"):
             return record
     if pending:
+        if pending.get("retry_at") and now < datetime.fromisoformat(pending["retry_at"]):
+            return record
         if pending.get("session_id"):
             try:
                 decision = await session_decision(pending["session_id"])
                 if decision:
                     return await finalize_decision(key, plan_id, pending["id"], decision)
+                if pending.get("retry_at"):
+                    return await record_poll_retry(key, plan_id, pending["id"])
+            except AIRetryableError as exc:
+                return await record_poll_retry(key, plan_id, pending["id"], str(exc))
             except AIUnavailable as exc:
                 return await fail_attempt(key, plan_id, pending["id"], str(exc))
         return record
-    if plan.get("last_requested_at") and now - datetime.fromisoformat(plan["last_requested_at"]) < timedelta(minutes=5):
+    if in_cooldown(plan, now):
         return record
     quote = await optional_market()
     now = utcnow()
@@ -186,8 +221,12 @@ async def check_plan(key, plan_id):
            "token_hash": hashlib.sha256(token.encode()).hexdigest(), "context": context, "quote": quote}
 
     def claim(current):
-        if current["status"] != "active" or current.get("pending_ai") or current.get("generation", 0) != job["generation"]:
+        claim_now = utcnow()
+        if (current["status"] != "active" or current.get("pending_ai")
+                or current.get("generation", 0) != job["generation"] or in_cooldown(current, claim_now)):
             return current
+        if not requires_ai(current, quote, claim_now):
+            return apply_check(current, quote, claim_now)
         result = copy.deepcopy(current)
         result["pending_ai"] = job
         result["last_requested_at"] = now.isoformat()

@@ -246,6 +246,171 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.post("/api/plans", json=self.payload | {"amount": -1}, headers=self.headers).status_code, 422)
         self.assertEqual(self.client.post("/convert", json={"amount": 1, "from_currency": "EUR", "to_currency": "GBP"}).status_code, 422)
 
+    def test_transient_poll_failure_preserves_authenticated_callback(self):
+        from devin_timing import AIRetryableError
+        with patch.dict(os.environ, {"VERCEL_ENV": "production", "EXCIFY_PUBLIC_URL": "https://excify.example"}):
+            plan = self.create()
+        job = plan["pending_ai"]
+        callback, token = self.callbacks[job["session_id"]]
+        with patch("timing_service.session_decision", new=AsyncMock(side_effect=AIRetryableError("Temporary HTTP 503"))) as poll:
+            retrying = self.finish(plan)
+            self.assertEqual(retrying["pending_ai"]["id"], job["id"])
+            self.assertIsNotNone(retrying["pending_ai"]["retry_at"])
+            self.finish(plan)
+            self.assertEqual(poll.await_count, 1)
+        self.ai_action = "execute"
+        decision = asyncio.run(self.decision(job["session_id"])).model_dump()
+        response = self.client.post(urlparse(callback).path, json=decision, headers={"Authorization": "Bearer " + token})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["status"], "completed")
+        self.assertEqual(len(self.sessions), 1)
+
+    def test_transient_retry_recovers_without_a_new_session(self):
+        from datetime import datetime
+        from devin_timing import AIRetryableError
+        plan = self.create()
+        with patch("timing_service.session_decision", new=AsyncMock(side_effect=AIRetryableError("Temporary timeout"))):
+            retrying = self.finish(plan)
+        retry_at = datetime.fromisoformat(retrying["pending_ai"]["retry_at"])
+        with patch("timing_service.utcnow", return_value=retry_at + timedelta(seconds=1)), patch("timing_service.session_decision", new=AsyncMock(return_value=None)):
+            recovered = self.finish(plan)
+        self.assertIsNone(recovered["pending_ai"]["retry_at"])
+        self.ai_action = "execute"
+        done = self.finish(plan)
+        self.assertEqual(done["status"], "completed")
+        self.assertEqual(len(self.sessions), 1)
+
+    def test_target_trigger_bypasses_retry_backoff(self):
+        from devin_timing import AIRetryableError
+        plan = self.create()
+        with patch("timing_service.session_decision", new=AsyncMock(side_effect=AIRetryableError("Temporary timeout"))):
+            self.finish(plan)
+        self.quote["rate"] = 380
+        with patch("timing_service.session_decision", new=AsyncMock(side_effect=AssertionError("Target execution must not poll AI"))):
+            done = self.finish(plan)
+        self.assertEqual(done["status"], "completed")
+        self.assertEqual(done["events"][-1]["code"], "target_execute")
+
+    def test_permanent_ai_failure_still_fails_closed(self):
+        from devin_timing import AIUnavailable
+        plan = self.create()
+        with patch("timing_service.session_decision", new=AsyncMock(side_effect=AIUnavailable("Invalid final decision"))):
+            failed = self.finish(plan)
+        self.assertIsNone(failed["pending_ai"])
+        self.assertIsNone(failed["receipt"])
+        self.assertEqual(failed["events"][-1]["code"], "ai_error")
+
+    def test_idempotent_plan_retry_accepts_equivalent_numbers_and_timezones(self):
+        from datetime import datetime, timezone
+        self.payload["request_id"] = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+        plan = self.create()
+        deadline = datetime.fromisoformat(self.payload["deadline"]).astimezone(timezone(timedelta(hours=2))).isoformat()
+        response = self.client.post("/api/plans", json=self.payload | {"amount": "1200.00", "target_rate": "380.0", "minimum_rate": "350.00", "deadline": deadline}, headers=self.headers)
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(response.json()["plans"][0]["id"], plan["id"])
+        self.assertEqual(len(self.sessions), 1)
+
+    def test_conflicting_payload_is_rejected_inside_atomic_save(self):
+        import hashlib
+        from autopilot import PlanInput, new_plan
+        from autopilot_api import save_new
+        from fastapi import HTTPException
+        async def scenario():
+            key = "account-" + hashlib.sha256(self.client.cookies.get("excify_session").encode()).hexdigest()
+            request = PlanInput(**(self.payload | {"request_id": "abababab-abab-abab-abab-abababababab"}))
+            first, second = new_plan(request), new_plan(request.model_copy(update={"amount": request.amount + 1}))
+            results = await asyncio.gather(save_new(key, first), save_new(key, second), return_exceptions=True)
+            conflicts = [r for r in results if isinstance(r, HTTPException)]
+            self.assertEqual(len(conflicts), 1)
+            self.assertEqual(conflicts[0].status_code, 409)
+            stored, _ = await plan_store.get_store().read(key)
+            self.assertEqual(len(stored["plans"]), 1)
+        asyncio.run(scenario())
+
+    def test_overlapping_checks_cannot_bypass_cooldown(self):
+        import hashlib
+        from autopilot import PlanInput, new_plan
+        from autopilot_api import save_new
+        from timing_service import check_plan
+        async def scenario():
+            key = "account-" + hashlib.sha256(self.client.cookies.get("excify_session").encode()).hexdigest()
+            plan = new_plan(PlanInput(**self.payload))
+            await save_new(key, plan)
+            entered, release = asyncio.Event(), asyncio.Event()
+            calls = 0
+            async def market():
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    entered.set()
+                    await release.wait()
+                return copy.deepcopy(self.quote)
+            with patch("timing_service.get_market", new=AsyncMock(side_effect=market)):
+                delayed = asyncio.create_task(check_plan(key, plan["id"]))
+                await asyncio.wait_for(entered.wait(), 2)
+                try:
+                    await check_plan(key, plan["id"])
+                    await check_plan(key, plan["id"])
+                finally:
+                    release.set()
+                    await delayed
+            self.assertEqual(len(self.sessions), 1)
+        asyncio.run(scenario())
+
+    def test_conflicting_manual_idempotency_payload_is_rejected(self):
+        payload = {"amount": 100, "confirmation": True, "request_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}
+        first = self.client.post("/api/exchange", json=payload, headers=self.headers)
+        second = self.client.post("/api/exchange", json=payload | {"amount": 200}, headers=self.headers)
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 409)
+        saved = self.client.get("/api/state").json()["plans"]
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0]["receipt"]["sent_eur"], "100.00")
+
+    def test_conflicting_plan_fields_are_rejected(self):
+        self.payload["request_id"] = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        self.create()
+        for changed in ({"amount": 200}, {"target_rate": 390}, {"minimum_rate": 355},
+                        {"strategy": "target_only"}, {"deadline": (self.now + timedelta(hours=32)).isoformat()}):
+            with self.subTest(changed=changed):
+                response = self.client.post("/api/plans", json=self.payload | changed, headers=self.headers)
+                self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(len(self.sessions), 1)
+
+    def test_idempotency_keys_cannot_cross_operation_types(self):
+        self.payload["request_id"] = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+        self.create()
+        response = self.client.post("/api/exchange", json={"amount": 1200, "confirmation": True,
+            "request_id": self.payload["request_id"]}, headers=self.headers)
+        self.assertEqual(response.status_code, 409)
+        self.assertIsNone(self.client.get("/api/state").json()["plans"][0]["receipt"])
+
+    def test_manual_request_id_cannot_be_reused_as_a_plan(self):
+        payload = {"amount": 100, "confirmation": True, "request_id": "acacacac-acac-acac-acac-acacacacacac"}
+        saved = self.client.post("/api/exchange", json=payload, headers=self.headers).json()["plans"][0]
+        plan_payload = {key: saved[key] for key in ("amount", "target_rate", "minimum_rate", "deadline", "strategy", "request_id")}
+        response = self.client.post("/api/plans", json=plan_payload, headers=self.headers)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(len(self.sessions), 0)
+
+    def test_identical_manual_retry_does_not_require_market_availability(self):
+        from market import MarketUnavailable
+        payload = {"amount": 100, "confirmation": True, "request_id": "dddddddd-dddd-dddd-dddd-dddddddddddd"}
+        first = self.client.post("/api/exchange", json=payload, headers=self.headers)
+        with patch("autopilot_api.get_market", new=AsyncMock(side_effect=MarketUnavailable("Offline"))) as market:
+            retry = self.client.post("/api/exchange", json=payload, headers=self.headers)
+        self.assertEqual(retry.status_code, 201, retry.text)
+        self.assertEqual(retry.json(), first.json())
+        market.assert_not_awaited()
+
+    def test_identical_plan_retry_is_not_revalidated_as_new_plan(self):
+        self.payload["request_id"] = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+        self.create()
+        with patch("autopilot_api.new_plan", side_effect=AssertionError("An identical retry must not create a new plan")):
+            retry = self.client.post("/api/plans", json=self.payload, headers=self.headers)
+        self.assertEqual(retry.status_code, 201, retry.text)
+        self.assertEqual(len(self.sessions), 1)
+
     def test_optimistic_concurrency_rejects_stale_write(self):
         async def scenario():
             store = plan_store.get_store()

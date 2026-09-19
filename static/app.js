@@ -123,15 +123,18 @@ function renderPlans(data) {
   plans = (data.plans || []).filter(plan => plan.pair === 'EUR/HUF');
   $('planList').innerHTML = plans.length ? plans.map((plan,index) => {
     const lastAI = plan.events.findLast(event => event.ai_action);
+    const lastOutcome = plan.events.findLast(event => event.action);
+    const aiIsLatest = lastAI === lastOutcome && !plan.pending_ai && plan.status !== 'paused';
     return `<article class="plan-card"><div class="card-heading"><h3>EUR ${fmt(plan.amount)} → HUF</h3>${statusBadge(plan.pending_ai && plan.status === 'active' ? 'AI analyzing' : plan.status)}</div>
       <p class="muted">AI-directed timing, rule-enforced safety limits</p>
       <div class="plan-meta"><div><span class="metric-label">Favorable target</span><strong>${rateFmt(plan.target_rate)}</strong></div><div><span class="metric-label">Protected minimum</span><strong>${rateFmt(plan.minimum_rate)}</strong></div><div><span class="metric-label">Deadline · UTC</span><strong>${esc(plan.deadline.slice(0,10))}</strong></div></div>
       <p class="plan-reason">${esc(plan.reason)}</p>
-      ${lastAI ? `<p class="ai-verdict">AI proposal: <strong>${esc(lastAI.ai_action.toUpperCase())}</strong> · Backend result: <strong>${esc(lastAI.action.toUpperCase())}</strong></p>` : ''}
-      ${plan.pending_ai ? `<p class="muted">Analysis requested ${esc(when(plan.pending_ai.created_at))}. No execution occurs until a valid AI result passes the safety checks.</p>` : ''}
-      <p class="muted" style="margin-top:10px">${plan.strategy === 'optimal' ? 'AI optimal timing' : 'AI timing above target only'} · Last completed check: ${esc(when(plan.last_checked_at))}</p>
+      ${lastOutcome ? `<p class="latest-outcome">Latest completed check: <strong>${esc(lastOutcome.action.toUpperCase())}</strong> · ${esc(when(lastOutcome.at))}</p>` : ''}
+      ${lastAI ? `<p class="ai-verdict">${aiIsLatest ? 'AI proposal for that check' : 'Previous AI proposal'}: <strong>${esc(lastAI.ai_action.toUpperCase())}</strong> · ${aiIsLatest ? 'Result at that check' : 'Previous outcome'}: <strong>${esc(lastAI.action.toUpperCase())}</strong> · ${esc(when(lastAI.at))}</p>` : ''}
+      ${plan.pending_ai ? `<p class="muted">Analysis requested ${esc(when(plan.pending_ai.created_at))}. Its AI result must pass the safety checks; the hard target trigger remains independent.</p>${plan.pending_ai.retry_at ? `<p class="muted">Temporary AI connection issue. The callback remains active; polling retries after ${esc(when(plan.pending_ai.retry_at))}.</p>` : ''}` : ''}
+      <p class="muted" style="margin-top:10px">${plan.strategy === 'optimal' ? 'Target + deadline-aware AI' : 'Strict target only'} · Last completed check: ${esc(when(plan.last_checked_at))}</p>
       ${receiptMarkup(plan.receipt)}
-      ${['active','paused'].includes(plan.status) ? `<div class="button-row"><button class="btn-secondary" data-action="toggle" data-id="${esc(plan.id)}" role="switch" aria-checked="${plan.status === 'active'}">Autopilot ${plan.status === 'active' ? 'ON — pause' : 'OFF — resume'}</button><button class="btn-secondary" data-action="check" data-id="${esc(plan.id)}" ${plan.status === 'paused' ? 'disabled' : ''}>${plan.pending_ai ? 'Check AI result' : 'Ask AI to recheck'}</button></div>` : ''}
+      ${['active','paused'].includes(plan.status) ? `<div class="button-row"><button class="btn-secondary" data-action="toggle" data-id="${esc(plan.id)}" role="switch" aria-checked="${plan.status === 'active'}">Autopilot ${plan.status === 'active' ? 'ON — pause' : 'OFF — resume'}</button><button class="btn-secondary" data-action="check" data-id="${esc(plan.id)}" ${plan.status === 'paused' ? 'disabled' : ''}>${plan.pending_ai ? 'Check AI result' : 'Check now'}</button></div>` : ''}
       <details ${index === 0 && lastAI ? 'open' : ''}><summary>Decision trail (${plan.events.length})</summary><ol class="timeline">${renderEvents(plan.events)}</ol></details></article>`;
   }).join('') : '<div class="history-empty"><strong>No EUR/HUF plans yet.</strong><p class="muted">Activate autopilot to request a real AI timing decision.</p></div>';
   const completed = plans.filter(plan => plan.receipt);

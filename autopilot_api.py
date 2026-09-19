@@ -5,14 +5,14 @@ import hmac
 import os
 import re
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from autopilot import AIDecision, AUTHORITY, PAIR, PlanInput, manual_exchange, new_plan, safety_block, set_enabled, utcnow, valid_quote
+from autopilot import AIDecision, AUTHORITY, PAIR, PlanInput, manual_exchange, money, new_plan, safety_block, set_enabled, utcnow, valid_quote
 from devin_timing import configured
 from market import get_market
 from plan_store import get_store, update_record
@@ -41,14 +41,44 @@ def account_key(request):
     return "account-" + hashlib.sha256(session.encode()).hexdigest()
 
 
+def creation_intent(data, operation=None):
+    if operation is None:
+        operation = "exchange" if (data.get("receipt") or {}).get("authority") == "User-confirmed simulation" else "plan"
+    intent = {"operation": operation, "pair": data.get("pair", PAIR), "amount": money(data["amount"])}
+    if operation == "plan":
+        deadline = data["deadline"]
+        if isinstance(deadline, str):
+            deadline = datetime.fromisoformat(deadline)
+        intent.update(target_rate=Decimal(str(data["target_rate"])), minimum_rate=Decimal(str(data["minimum_rate"])),
+                      deadline=deadline.astimezone(timezone.utc), strategy=data["strategy"])
+    return intent
+
+
+def matching_request(record, request_id, intent):
+    existing = next((plan for plan in (record or {}).get("plans", []) if plan["id"] == request_id), None)
+    if existing is None:
+        return None
+    if creation_intent(existing) != intent:
+        raise HTTPException(409, "This request ID was already used with different details. Use a new request ID for a new action.")
+    return record
+
+
+async def existing_request(key, req, operation):
+    if not req.request_id:
+        return None
+    record, _ = await get_store().read(key)
+    return matching_request(record, req.request_id, creation_intent(req.model_dump(), operation))
+
+
 async def save_new(key, plan):
+    intent = creation_intent(plan)
     existing, _ = await get_store().read(key)
     if existing is None and len(await get_store().keys()) >= 100:
         raise HTTPException(429, "This demo has reached its session capacity.")
 
     def append(record):
         record = copy.deepcopy(record or {"plans": []})
-        if any(p["id"] == plan["id"] for p in record["plans"]):
+        if matching_request(record, plan["id"], intent) is not None:
             return record
         if len(record["plans"]) >= 10:
             raise HTTPException(429, "This demo supports ten plans per browser session.")
@@ -85,6 +115,9 @@ async def state(request: Request, response: Response):
 @router.post("/plans", status_code=201)
 async def create_plan(req: PlanInput, request: Request):
     key = account_key(request)
+    existing = await existing_request(key, req, "plan")
+    if existing is not None:
+        return public_record(existing)
     plan = new_plan(req)
     await save_new(key, plan)
     return public_record(await run_check(key, plan["id"]))
@@ -114,6 +147,9 @@ async def ai_callback(key: str, plan_id: str, attempt_id: str, decision: AIDecis
 @router.post("/exchange", status_code=201)
 async def exchange(req: ExchangeRequest, request: Request):
     key = account_key(request)
+    existing = await existing_request(key, req, "exchange")
+    if existing is not None:
+        return public_record(existing)
     quote = await get_market()
     return public_record(await save_new(key, manual_exchange(req, quote)))
 

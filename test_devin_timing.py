@@ -2,7 +2,9 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
-from devin_timing import AIUnavailable, configuration, evidence, session_decision, start_session
+import httpx
+
+from devin_timing import AIRetryableError, AIUnavailable, configuration, evidence, request_json, session_decision, start_session
 
 
 class DevinClientTests(unittest.IsolatedAsyncioTestCase):
@@ -71,6 +73,33 @@ class DevinClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_finished_session_without_decision_fails_closed(self):
         with patch("devin_timing.request_json", new=AsyncMock(return_value={"status_enum": "finished"})), self.assertRaises(AIUnavailable):
             await session_decision("devin-test-session")
+
+    async def test_temporary_http_errors_are_retryable(self):
+        for status in (408, 425, 429, 500, 502, 503, 504):
+            client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(status)))
+            with self.subTest(status=status), patch("devin_timing.httpx.AsyncClient", return_value=client), self.assertRaises(AIRetryableError):
+                await request_json("GET", "https://api.devin.ai/v1/sessions/devin-test")
+
+    async def test_network_timeout_is_retryable(self):
+        def timeout(request):
+            raise httpx.ReadTimeout("Timeout", request=request)
+        client = httpx.AsyncClient(transport=httpx.MockTransport(timeout))
+        with patch("devin_timing.httpx.AsyncClient", return_value=client), self.assertRaises(AIRetryableError):
+            await request_json("GET", "https://api.devin.ai/v1/sessions/devin-test")
+
+    async def test_authentication_failures_are_terminal_and_sanitized(self):
+        for status in (401, 403, 404):
+            client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(status, text="sensitive-provider-body")))
+            with self.subTest(status=status), patch("devin_timing.httpx.AsyncClient", return_value=client), self.assertRaises(AIUnavailable) as failure:
+                await request_json("GET", "https://api.devin.ai/v1/sessions/devin-test")
+            self.assertNotIsInstance(failure.exception, AIRetryableError)
+            self.assertNotIn("sensitive-provider-body", str(failure.exception))
+
+    async def test_non_object_provider_response_is_terminal(self):
+        client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=[])))
+        with patch("devin_timing.httpx.AsyncClient", return_value=client), self.assertRaises(AIUnavailable) as failure:
+            await request_json("GET", "https://api.devin.ai/v1/sessions/devin-test")
+        self.assertNotIsInstance(failure.exception, AIRetryableError)
 
     async def test_non_https_callback_is_rejected(self):
         with self.assertRaises(AIUnavailable):

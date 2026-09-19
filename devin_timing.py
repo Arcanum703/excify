@@ -13,6 +13,10 @@ class AIUnavailable(Exception):
     pass
 
 
+class AIRetryableError(AIUnavailable):
+    pass
+
+
 def configuration():
     key = os.getenv("DEVIN_API_KEY", "").strip()
     if not key:
@@ -57,10 +61,18 @@ async def request_json(method, url, *, body=None):
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             response = await client.request(method, url, headers={"Authorization": "Bearer " + key}, json=body)
-        if not response.is_success:
-            raise AIUnavailable(f"Devin API returned HTTP {response.status_code}. No execution was authorized.")
-        return response.json()
-    except (httpx.HTTPError, ValueError) as exc:
+    except httpx.HTTPError as exc:
+        raise AIRetryableError("Devin is temporarily unreachable. No execution was authorized by this request.") from exc
+    if response.status_code in (408, 425, 429) or response.status_code >= 500:
+        raise AIRetryableError(f"Devin is temporarily unavailable (HTTP {response.status_code}). No execution was authorized by this request.")
+    if not response.is_success:
+        raise AIUnavailable(f"Devin API returned HTTP {response.status_code}. No execution was authorized.")
+    try:
+        result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError("Expected a response object")
+        return result
+    except ValueError as exc:
         raise AIUnavailable("Devin could not return a verified response. Holding safely.") from exc
 
 

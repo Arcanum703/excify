@@ -4,7 +4,7 @@
 
 Live demo: https://excify-livid.vercel.app
 
-Excify gives Devin the execute/wait decision for an authorized **simulated EUR → HUF exchange**. Real European Central Bank observations, the recent trend, and the user's goal are its inputs. Code—not the model—enforces the protected minimum, deadline, pause state, and rate freshness before applying the result.
+Excify executes an authorized **simulated EUR → HUF exchange** immediately when its favorable target is met. Below the target, it waits until the final 36 hours, when Devin can decide execute/wait using real European Central Bank observations, recent trend, and the user's goal. Code—not the model—always enforces the protected minimum, deadline, pause state, and rate freshness.
 
 No bank is connected. No money moves. Reference rates do not include a bank's fees, spreads, or settlement terms. Excify is not affiliated with Wise and does not guarantee a best future rate.
 
@@ -12,8 +12,8 @@ No bank is connected. No money moves. Reference rates do not include a bank's fe
 
 1. Enter EUR and inspect the real HUF quote and its publication date.
 2. Set an amount, favorable target, protected minimum, deadline, and strategy; activate AI autopilot.
-3. Watch a pending Devin analysis become an **execute** or **wait** decision. The log records its rationale, session identifier, market evidence, and the backend outcome.
-4. Click a decision marker on the 30-day chart. AI execution, AI waiting, and a safety veto are distinguished.
+3. At target, watch immediate execution; otherwise watch monitoring or a near-deadline Devin analysis. The trail records the decision source, any AI rationale/session, market evidence, and backend outcome. The card separates the latest completed check from previous AI advice.
+4. Click a decision marker on the 30-day chart. Target execution, AI execution, waiting, and a safety veto are distinguished.
 5. Pause the plan, refresh, or close the browser. Production decisions are delivered to the server independently of the browser.
 
 Manual simulations remain available behind explicit confirmation and are labeled **User-confirmed**, not AI-directed.
@@ -62,7 +62,9 @@ Vercel Hobby Cron requests checks daily between **17:00 and 18:00 UTC**. Activat
 
 Each check reserves a persistent job before creating a Devin session. Devin receives only numeric/enum goal data and verified market history—not arbitrary user prompts or repository tasks. Organization knowledge/secrets are disabled. A session-specific, sensitive callback token authorizes only that one decision.
 
-Devin posts its final decision to a scoped callback; the backend independently validates and applies it. This works with the browser closed. The normal check endpoint and daily worker can also reconcile saved session output if delivery fails. An expired/failed session holds safely and is visible in the trail.
+Devin posts its final decision to a scoped callback; the backend independently validates and applies it. This works with the browser closed. The normal check endpoint and daily worker can also reconcile saved session output if delivery fails. Temporary failures polling an existing session (timeouts, rate limits, and server errors) preserve its job and callback, with bounded polling backoff from 30 seconds up to five minutes within the original analysis window. A valid callback can complete during backoff, and the hard target trigger remains immediate. Invalid decisions and permanent failures still fail closed.
+
+The five-minute limit on starting another AI analysis is checked inside the same conditional write that reserves the job, not just against an earlier snapshot. Overlapping checks cannot spend another AI session during that cooldown.
 
 A conditional global budget allows **20 sessions/day by default**, bounded to one ACU each. `DEVIN_MAX_SESSIONS_PER_DAY` can change the daily cap, up to 100. This limits accidental public-demo usage of the supplied Devin account; it does not assert the account's usage is free.
 
@@ -99,17 +101,17 @@ Open http://127.0.0.1:8000. Put secrets in the ignored `.env.local` file; never 
 | `EXCIFY_PUBLIC_URL` | Trusted HTTPS production origin for scoped AI callbacks. |
 | `DEVIN_MAX_SESSIONS_PER_DAY` | Bounded provider usage; defaults to 20. |
 
-Local/preview environments do not use the production callback. Use **Check AI result**, or leave the UI open to reconcile pending results. Without a Devin key, quotes and explicit manual simulations work but autonomous timing holds. No local scheduler is implied.
+Local/preview environments do not use the production callback. Use **Check AI result**, or leave the UI open to reconcile pending results. Without a Devin key, quotes, explicit manual simulations, and automatic target triggers work; near-deadline middle-zone AI timing holds. No local scheduler is implied.
 
 ## Test
 
 ```sh
-python -m unittest test_ai_timing test_autopilot test_api test_store test_market test_devin_timing -v
-node --test test_chart.cjs
+python -m unittest test_target_trigger test_ai_timing test_autopilot test_api test_store test_market test_devin_timing -v
+node --test test_chart.cjs test_ui.cjs
 node --check static/app.js
 ```
 
-Automated tests use temporary SQLite and mocked provider responses; they do not spend API credits. Coverage includes AI wait above target, AI execute below target, an execute proposal blocked by the minimum, deadline/pause enforcement, callback authentication and replay, response evidence matching, budget limits, persistence, private sessions, atomic writes, real-shaped HUF data, chart marker alignment, and escaping model text.
+Automated tests use temporary SQLite and mocked provider responses; they do not spend API credits. Coverage includes immediate target execution without AI, early middle-zone monitoring, near-deadline AI decisions, minimum/deadline/pause enforcement, callback authentication and replay, transient polling recovery, atomic cooldown races, conflicting idempotency payloads, persistence, real-shaped HUF data, chart alignment, and rendering the latest outcome separately from historical AI advice.
 
 Live verification separately creates bounded real Devin sessions using actual ECB observations. The original `test_pattern.py` remains an exploratory sample-data script, not an execution engine. Its sample transactions use real dated HUF observations with explicitly simulated amounts/results.
 
@@ -127,6 +129,8 @@ Vercel Hobby storage has usage limits; exceeding them pauses access rather than 
 Private plans are isolated by opaque HttpOnly, SameSite browser-session cookies (Secure on Vercel); storage uses only their hashes. Keep cookies to revisit a plan. Losing cookies does not cancel it: pause plans first.
 
 The EUR/HUF release uses a **new currency-versioned storage namespace** and local database. Prior-pair data is preserved in its old namespace, excluded from the new UI and worker, and never relabeled or numerically reinterpreted. Create new EUR/HUF plans. Development, preview, and production are isolated from each other.
+
+Reusing a request ID with different amounts, goals, deadlines, strategies, or operation types returns HTTP 409. Equivalent numeric formats and timezone representations are accepted. Identical retries return the saved result without fetching a new quote or starting another action; the comparison is repeated inside the atomic save and works with existing records.
 
 Callback tokens are scoped, hashed at rest, and excluded from API responses. Provider keys never reach the browser. Pause/resume increments plan authorization versions; an old response cannot execute a newly resumed plan. Provider errors are sanitized. The demo is not a production banking ledger or financial-advice system.
 
