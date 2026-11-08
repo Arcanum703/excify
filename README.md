@@ -2,7 +2,45 @@
 
 **AI-directed timing, rule-enforced safety limits.**
 
-Live demo: https://excify-livid.vercel.app
+[![CI](https://github.com/Arcanum703/excify/actions/workflows/ci.yml/badge.svg)](https://github.com/Arcanum703/excify/actions/workflows/ci.yml)
+
+Live demo: https://excify-livid.vercel.app · FastAPI, vanilla JS, Vercel Cron + Blob · 85 Python + 12 JS tests
+
+![Excify: EUR/HUF converter with the real ECB rate chart](docs/screenshot.png)
+
+**What is Devin?** [Devin](https://devin.ai) is Cognition's autonomous AI agent. Excify calls it
+through its API as the decision-maker for borderline cases: it gets only numeric plan data and real
+ECB rate history, returns a schema-validated `execute`/`wait` decision with a rationale, and posts it
+to a one-time callback. It never moves money and never overrides the rules below.
+
+## How a decision is made
+
+```mermaid
+flowchart TD
+    A[Daily cron, activation or resume] --> B{Deadline passed?}
+    B -- yes --> EX[Expire, no late exchange]
+    B -- no --> C{Plan paused?}
+    C -- yes --> H[Hold]
+    C -- no --> D{Fresh, verified<br/>ECB EUR/HUF rate?}
+    D -- no --> H
+    D -- yes --> E{Rate < protected minimum?}
+    E -- yes --> H
+    E -- no --> T{Rate ≥ target?}
+    T -- yes --> X[Execute simulated exchange<br/>no AI needed]
+    T -- no --> O{Target-only mode?}
+    O -- yes --> H
+    O -- no --> F{More than 36 h<br/>to deadline?}
+    F -- yes --> W[Wait and monitor]
+    F -- no --> G[Ask Devin: execute or wait?]
+    G --> V{Valid answer, same rate,<br/>safety rechecked?}
+    V -- no / no answer --> H
+    V -- execute --> X
+    V -- wait --> W
+```
+
+Code decides everything except the narrow middle zone near the deadline, and even there the AI's
+answer is re-validated against the current plan and rate before anything happens. Execution and its
+receipt are stored in one conditional write, so a retried callback cannot execute twice.
 
 Excify executes an authorized **simulated EUR → HUF exchange** immediately when its favorable target is met. Below the target, it waits until the final 36 hours, when Devin can decide execute/wait using real European Central Bank observations, recent trend, and the user's goal. Code—not the model—always enforces the protected minimum, deadline, pause state, and rate freshness.
 

@@ -1,8 +1,8 @@
-# Render Blueprint — deploys the Wise Agent as a single free web service.
+# Render Blueprint — deploys Excify as a single free web service.
 # Docs: https://render.com/docs/blueprint-spec
 services:
   - type: web
-    name: wise-agent
+    name: excify
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
